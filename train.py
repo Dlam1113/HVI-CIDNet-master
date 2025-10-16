@@ -17,23 +17,32 @@ from tqdm import tqdm
 from datetime import datetime
 
 opt = option().parse_args()
+# opt 是一个 argparse.Namespace 对象
+# 这个对象是一个"空的盒子"，可以动态地往里面放东西
 
-def seed_torch():
-    seed = random.randint(1, 1000000)
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    os.environ['PYTHONHASHSEED'] = str(seed)
+def seed_torch(seed = 42):
+    """设置所有相关的随机种子以确保实验的可重复性"""
+    print(f"使用随机种子：{seed}")
+    
+    random.seed(seed)           # Python随机数种子
+    np.random.seed(seed)        # NumPy随机数种子
+    torch.manual_seed(seed)     # PyTorch CPU随机数种子
+    torch.cuda.manual_seed(seed)     # PyTorch单GPU随机数种子
+    torch.cuda.manual_seed_all(seed) # PyTorch多GPU随机数种子
+    os.environ['PYTHONHASHSEED'] = str(seed)  # Python哈希种子，针对dict和set中元素的存储顺序和遍历顺序
+    
+    # 确保完全可重复性（会稍微降低训练速度）
+    torch.backends.cudnn.deterministic = True  # 使用确定性算法
+    torch.backends.cudnn.benchmark = False     # 关闭自动优化，确保可重复
     
 def train_init():
-    seed_torch()
-    cudnn.benchmark = True
-    os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+    """初始化训练环境"""
+    seed_torch()                    # 设置随机种子
+    # cudnn.benchmark 已在 seed_torch() 中设置为 False 以确保可重复性
+    os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # 指定使用第0号GPU
     cuda = opt.gpu_mode
     if cuda and not torch.cuda.is_available():
-        raise Exception("No GPU found, please run without --cuda")
+        raise RuntimeError("No GPU found, please run without --cuda")
     
 def train(epoch):
     model.train()
@@ -52,7 +61,20 @@ def train(epoch):
         # use random gamma function (enhancement curve) to improve generalization
         if opt.gamma:
             gamma = random.randint(opt.start_gamma,opt.end_gamma) / 100.0
-            output_rgb = model(im1 ** gamma)  
+            output_rgb = model(im1 ** gamma) 
+            def data_augmentation_purpose():
+                    """
+                    Gamma数据增强在低光图像增强中的作用
+                    """
+                    # 1. 模拟不同的光照条件
+                    #    - gamma < 1.0: 模拟更暗的环境
+                    #    - gamma > 1.0: 模拟相对较亮的环境                    
+                    # 2. 提高模型的泛化能力  
+                    #    - 训练时见过各种亮度的图像
+                    #    - 测试时对不同光照条件更robust                   
+                    # 3. 增强模型的适应性
+                    #    - 学会处理各种程度的低光图像
+                    #    - 避免过拟合特定亮度的训练数据 
         else:
             output_rgb = model(im1)  
             
@@ -64,22 +86,26 @@ def train(epoch):
         loss = loss_rgb + opt.HVI_weight * loss_hvi
         iter += 1
         
+        # 梯度裁剪防止梯度爆炸
         if opt.grad_clip:
             torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01, norm_type=2)
         
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+        # 标准的反向传播过程
+        optimizer.zero_grad()  # 清零梯度
+        loss.backward()        # 反向传播
+        optimizer.step()       # 更新参数
         
         loss_print = loss_print + loss.item()
         loss_last_10 = loss_last_10 + loss.item()
         pic_cnt += 1
         pic_last_10 += 1
+        # 每个epoch结束时保存样本图像
         if iter == train_len:
             print("===> Epoch[{}]: Loss: {:.4f} || Learning rate: lr={}.".format(epoch,
                 loss_last_10/pic_last_10, optimizer.param_groups[0]['lr']))
             loss_last_10 = 0
             pic_last_10 = 0
+            # 保存训练样本
             output_img = transforms.ToPILImage()((output_rgb)[0].squeeze(0))
             gt_img = transforms.ToPILImage()((gt_rgb)[0].squeeze(0))
             if not os.path.exists(opt.val_folder+'training'):          
@@ -150,21 +176,29 @@ def load_datasets():
             test_set = get_fivek_eval_set(opt.data_val_fivek)
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
     else:
-        raise Exception("should choose a dataset")
+        raise ValueError("should choose a dataset")
     return training_data_loader, testing_data_loader
 
 def build_model():
+    """构建CIDNet模型"""
     print('===> Building model ')
-    model = CIDNet().cuda()
+    model = CIDNet().cuda()  # 创建模型并移到GPU
     if opt.start_epoch > 0:
         pth = f"./weights/train/epoch_{opt.start_epoch}.pth"
+        # torch.load(): 加载保存的模型权重文件
+        # map_location: 指定加载到哪个设备
+        #   - lambda storage, loc: storage 表示加载到原来保存时的设备
+        #   - 避免 GPU/CPU 之间的设备不匹配问题
         model.load_state_dict(torch.load(pth, map_location=lambda storage, loc: storage))
+        print(f'===> 已加载预训练模型: {pth}')
     return model
 
 def make_scheduler():
+    """创建优化器和学习率调度器"""
     optimizer = optim.Adam(model.parameters(), lr=opt.lr)      
     if opt.cos_restart_cyclic:
         if opt.start_warmup:
+            # 带预热的余弦退火调度器
             scheduler_step = CosineAnnealingRestartCyclicLR(optimizer=optimizer, periods=[(opt.nEpochs//4)-opt.warmup_epochs, (opt.nEpochs*3)//4], restart_weights=[1,1],eta_mins=[0.0002,0.0000001])
             scheduler = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=opt.warmup_epochs, after_scheduler=scheduler_step)
         else:
@@ -176,7 +210,7 @@ def make_scheduler():
         else:
             scheduler = CosineAnnealingRestartLR(optimizer=optimizer, periods=[opt.nEpochs - opt.start_epoch], restart_weights=[1],eta_min=1e-7)
     else:
-        raise Exception("should choose a scheduler")
+        raise ValueError("should choose a scheduler")
     return optimizer,scheduler
 
 def init_loss():
@@ -205,8 +239,11 @@ if __name__ == '__main__':
     '''
     train
     '''
+    #峰值信噪比
     psnr = []
+    #结构相似性：是一种衡量两幅图像相似度的指标，常用于评估图像失真前后的相似性
     ssim = []
+    #学习感知图像块相似度也称感知损失
     lpips = []
     start_epoch=0
     if opt.start_epoch > 0:
@@ -215,9 +252,10 @@ if __name__ == '__main__':
         os.mkdir(opt.val_folder) 
         
     for epoch in range(start_epoch+1, opt.nEpochs + start_epoch + 1):
-        epoch_loss, pic_num = train(epoch)
-        scheduler.step()
-        
+        epoch_loss, pic_num = train(epoch)  # 训练一个epoch
+        scheduler.step()  # 更新学习率
+
+        # 每隔一定epoch进行模型评估
         if epoch % opt.snapshots == 0:
             model_out_path = checkpoint(epoch) 
             norm_size = True
@@ -257,9 +295,10 @@ if __name__ == '__main__':
                 norm_size = False
 
             im_dir = opt.val_folder + output_folder + '*.png'
+            # 在验证集上评估模型性能
             eval(model, testing_data_loader, model_out_path, opt.val_folder+output_folder, 
                  norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
-            
+            # 计算评估指标
             avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)
             print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
             print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
