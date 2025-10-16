@@ -278,17 +278,17 @@ def nothing(self):
         虽然这里实现的是注意力机制，但在整体架构中起到FFN的作用
         
         GDFN - Gated Dense Feed-forward Network（门控密集前馈网络）其实就是强度增强层"""
-def lca_architecture_explained(self):
-        """
-        LCA中FFN和GDFN的作用分工
-        """
-        # 步骤1：交叉注意力（FFN实现）
-        x = x + self.ffn(self.norm(x), self.norm(y))
-        # 作用：让x关注y中的重要信息，实现特征交换
+# def lca_architecture_explained(self):
+#         """
+#         LCA中FFN和GDFN的作用分工
+#         """
+#         # 步骤1：交叉注意力（FFN实现）
+#         x = x + self.ffn(self.norm(x), self.norm(y))
+#         # 作用：让x关注y中的重要信息，实现特征交换
         
-        # 步骤2：强度增强（GDFN实现）  
-        x = self.gdfn(self.norm(x))
-        # 作用：通过门控机制增强特征表达，特别是亮度信息
+#         # 步骤2：强度增强（GDFN实现）  
+#         x = self.gdfn(self.norm(x))
+#         # 作用：通过门控机制增强特征表达，特别是亮度信息
     
 class I_LCA(nn.Module):          #I轻量级交叉注意力
     def __init__(self, dim,num_heads, bias=False):

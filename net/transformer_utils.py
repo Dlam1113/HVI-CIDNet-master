@@ -174,15 +174,15 @@ class NormUpsample(nn.Module):
             return self.norm(x)
         else:
             return x
-def feature_concatenation_example():
-    """
-    特征拼接的详细过程解释了torch.cat和self.up输入通道为什么是输出通道的两倍
-    """
-    # x: 上采样后的特征 [batch, 72, 64, 64]  (高语义信息)
-    # y: 编码器跳跃连接   [batch, 72, 64, 64]  (细节信息)
+# def feature_concatenation_example():
+#     """
+#     特征拼接的详细过程解释了torch.cat和self.up输入通道为什么是输出通道的两倍
+#     """
+#     # x: 上采样后的特征 [batch, 72, 64, 64]  (高语义信息)
+#     # y: 编码器跳跃连接   [batch, 72, 64, 64]  (细节信息)
         
-    # torch.cat沿着通道维度(dim=1)拼接
-    concatenated = torch.cat([x, y], dim=1)
+#     # torch.cat沿着通道维度(dim=1)拼接
+#     concatenated = torch.cat([x, y], dim=1)
     # 结果: [batch, 144, 64, 64]  (通道数翻倍)
         
     # 为什么拼接？

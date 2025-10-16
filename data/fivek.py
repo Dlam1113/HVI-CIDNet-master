@@ -27,8 +27,7 @@ class FiveKDatasetFromFolder(data.Dataset):
         im2 = load_img(data_filenames2[index])
         _, file1 = os.path.split(data_filenames[index])
         _, file2 = os.path.split(data_filenames2[index])
-        seed = random.randint(1, 1000000)
-        seed = np.random.randint(seed) # make a seed with numpy generator 
+        seed = random.randint(1, 1000000) 
         if self.transform:
             random.seed(seed) # apply this seed to img tranfsorms
             torch.manual_seed(seed) # needed for torchvision 0.7

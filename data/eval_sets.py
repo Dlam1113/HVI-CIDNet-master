@@ -20,12 +20,13 @@ class SICEDatasetFromFolderEval(data.Dataset):
 
         if self.transform:
             input = self.transform(input)
-            factor = 8
-            h, w = input.shape[1], input.shape[2]
-            H, W = ((h + factor) // factor) * factor, ((w + factor) // factor) * factor
-            padh = H - h if h % factor != 0 else 0
-            padw = W - w if w % factor != 0 else 0
-            input = F.pad(input.unsqueeze(0), (0,padw,0,padh), 'reflect').squeeze(0)
+            factor = 8  # 要求尺寸是8的倍数
+            h, w = input.shape[1], input.shape[2]  # 获取当前图片的高度和宽度
+            H, W = ((h + factor) // factor) * factor, ((w + factor) // factor) * factor  # 计算目标尺寸
+            padh = H - h if h % factor != 0 else 0  # 计算需要填充的高度
+            padw = W - w if w % factor != 0 else 0  # 计算需要填充的宽度
+            input = F.pad(input.unsqueeze(0), (0,padw,0,padh), 'reflect').squeeze(0)  # 执行填充factor = 8
+            
         return input, file, h, w
 
     def __len__(self):

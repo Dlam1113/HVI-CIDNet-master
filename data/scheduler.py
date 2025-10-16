@@ -2,6 +2,8 @@ from torch.optim.lr_scheduler import _LRScheduler
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 import math
 
+
+#渐进式预热调度器
 class GradualWarmupScheduler(_LRScheduler):
     """ Gradually warm-up(increasing) learning rate in optimizer.
     Proposed in 'Accurate, Large Minibatch SGD: Training ImageNet in 1 Hour'.
@@ -81,7 +83,8 @@ def get_position_from_periods(iteration, cumulative_period):
     for i, period in enumerate(cumulative_period):
         if iteration <= period:
             return i
-        
+
+#循环余弦退火重启学习率调度器
 class CosineAnnealingRestartCyclicLR(_LRScheduler):
     """ Cosine annealing with restarts learning rate scheme.
     An example of config:
@@ -130,6 +133,7 @@ class CosineAnnealingRestartCyclicLR(_LRScheduler):
             for base_lr in self.base_lrs
         ]
 
+#循环余弦退火重启学习率调度器（不循环）
 class CosineAnnealingRestartLR(_LRScheduler):
     """ Cosine annealing with restarts learning rate scheme.
 
