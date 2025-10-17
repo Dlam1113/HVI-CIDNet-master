@@ -195,12 +195,26 @@ def build_model():
 
 def make_scheduler():
     """创建优化器和学习率调度器"""
+    # 步骤1: 创建Adam优化器
     optimizer = optim.Adam(model.parameters(), lr=opt.lr)      
-    if opt.cos_restart_cyclic:
-        if opt.start_warmup:
-            # 带预热的余弦退火调度器
-            scheduler_step = CosineAnnealingRestartCyclicLR(optimizer=optimizer, periods=[(opt.nEpochs//4)-opt.warmup_epochs, (opt.nEpochs*3)//4], restart_weights=[1,1],eta_mins=[0.0002,0.0000001])
-            scheduler = GradualWarmupScheduler(optimizer, multiplier=1, total_epoch=opt.warmup_epochs, after_scheduler=scheduler_step)
+    
+    # 步骤2: 根据配置选择调度器
+    if opt.cos_restart_cyclic:  # 使用循环余弦退火
+        if opt.start_warmup:  # 如果启用warmup
+            # 2.1 先创建余弦退火调度器（作为主调度器）
+            scheduler_step = CosineAnnealingRestartCyclicLR(
+                optimizer=optimizer, 
+                periods=[(opt.nEpochs//4)-opt.warmup_epochs, (opt.nEpochs*3)//4],
+                restart_weights=[1, 1], # 重启时的权重
+                eta_mins=[0.0002, 0.0000001] # 每个周期的最小学习率
+            )
+            # 2.2 用warmup调度器包装主调度器
+            scheduler = GradualWarmupScheduler(
+                optimizer, 
+                multiplier=1, 
+                total_epoch=opt.warmup_epochs, 
+                after_scheduler=scheduler_step
+            )
         else:
             scheduler = CosineAnnealingRestartCyclicLR(optimizer=optimizer, periods=[opt.nEpochs//4, (opt.nEpochs*3)//4], restart_weights=[1,1],eta_mins=[0.0002,0.0000001])
     elif opt.cos_restart:
@@ -219,11 +233,11 @@ def init_loss():
     E_weight    = opt.E_weight 
     P_weight    = 1.0
     
-    L1_loss= L1Loss(loss_weight=L1_weight, reduction='mean').cuda()
-    D_loss = SSIM(weight=D_weight).cuda()
-    E_loss = EdgeLoss(loss_weight=E_weight).cuda()
-    P_loss = PerceptualLoss({'conv1_2': 1, 'conv2_2': 1,'conv3_4': 1,'conv4_4': 1}, perceptual_weight = P_weight ,criterion='mse').cuda()
-    return L1_loss,P_loss,E_loss,D_loss
+    L1_loss= L1Loss(loss_weight=L1_weight, reduction='mean').cuda() # 创建L1损失函数
+    D_loss = SSIM(weight=D_weight).cuda() # 创建SSIM损失函数
+    E_loss = EdgeLoss(loss_weight=E_weight).cuda() # 创建边缘损失函数
+    P_loss = PerceptualLoss({'conv1_2': 1, 'conv2_2': 1,'conv3_4': 1,'conv4_4': 1}, perceptual_weight = P_weight ,criterion='mse').cuda() # 创建感知损失函数
+    return L1_loss,P_loss,E_loss,D_loss 
 
 if __name__ == '__main__':  
     

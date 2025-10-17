@@ -116,28 +116,28 @@ def gaussian(window_size,sigma):
 
 
 def create_window(window_size,channel=1):
-    _1D_window = gaussian(window_size, 1.5).unsqueeze(1)  
-    _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0)
-    window = Variable(_2D_window.expand(channel, 1, window_size, window_size).contiguous())
+    _1D_window = gaussian(window_size, 1.5).unsqueeze(1)  # 创建一维高斯窗口
+    _2D_window = _1D_window.mm(_1D_window.t()).float().unsqueeze(0).unsqueeze(0) # 创建二维高斯窗口
+    window = Variable(_2D_window.expand(channel, 1, window_size, window_size).contiguous()) # 扩展窗口
     return window
 
 
 def map_ssim(img1, img2, window, window_size, channel, size_average=True):
-    mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel)
-    mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel)
+    mu1 = F.conv2d(img1, window, padding=window_size // 2, groups=channel) # 计算图像1的均值
+    mu2 = F.conv2d(img2, window, padding=window_size // 2, groups=channel) # 计算图像2的均值
 
-    mu1_sq = mu1.pow(2)
-    mu2_sq = mu2.pow(2)
-    mu1_mu2 = mu1 * mu2
+    mu1_sq = mu1.pow(2) # 计算图像1的平方   
+    mu2_sq = mu2.pow(2) # 计算图像2的平方
+    mu1_mu2 = mu1 * mu2 # 计算图像1和图像2的乘积
 
-    sigma1_sq = F.conv2d(img1 * img1, window, padding=window_size // 2, groups=channel) - mu1_sq
-    sigma2_sq = F.conv2d(img2 * img2, window, padding=window_size // 2, groups=channel) - mu2_sq
-    sigma12 = F.conv2d(img1 * img2, window, padding=window_size // 2, groups=channel) - mu1_mu2
+    sigma1_sq = F.conv2d(img1 * img1, window, padding=window_size // 2, groups=channel) - mu1_sq # 计算图像1的方差
+    sigma2_sq = F.conv2d(img2 * img2, window, padding=window_size // 2, groups=channel) - mu2_sq # 计算图像2的方差
+    sigma12 = F.conv2d(img1 * img2, window, padding=window_size // 2, groups=channel) - mu1_mu2 # 计算图像1和图像2的协方差
 
-    C1 = 0.01 ** 2
-    C2 = 0.03 ** 2
+    C1 = 0.01 ** 2 # 计算C1
+    C2 = 0.03 ** 2 # 计算C2
 
-    ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2))
+    ssim_map = ((2 * mu1_mu2 + C1) * (2 * sigma12 + C2)) / ((mu1_sq + mu2_sq + C1) * (sigma1_sq + sigma2_sq + C2)) # 计算SSIM损失
 
     if size_average:
         return ssim_map.mean()

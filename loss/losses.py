@@ -39,6 +39,14 @@ class L1Loss(nn.Module):
         
         
 class EdgeLoss(nn.Module):
+    """
+    边缘损失函数
+    通过拉普拉斯金字塔提取边缘信息,然后计算MSE损失
+    
+    参数：
+        loss_weight (float): 损失权重,默认1.0
+        reduction (str): 归约方式,默认'mean'
+    """
     def __init__(self,loss_weight=1.0, reduction='mean'):
         super(EdgeLoss, self).__init__()
         k = torch.Tensor([[.05, .25, .4, .25, .05]])
@@ -47,6 +55,15 @@ class EdgeLoss(nn.Module):
         self.weight = loss_weight
         
     def conv_gauss(self, img):
+        """
+        高斯卷积
+        
+        参数：
+            img (Tensor): 输入图像,shape: [N, C, H, W]
+        
+        返回：
+            Tensor: 高斯卷积后的图像,shape: [N, C, H, W]
+        """
         n_channels, _, kw, kh = self.kernel.shape
         img = F.pad(img, (kw//2, kh//2, kw//2, kh//2), mode='replicate')
         return F.conv2d(img, self.kernel, groups=n_channels)
@@ -164,30 +181,64 @@ class PerceptualLoss(nn.Module):
 
 
 class SSIM(torch.nn.Module):
+    """
+    结构相似性损失函数
+    
+    参数说明：
+        window_size (int): 高斯窗口大小,默认11x11
+        size_average (bool): 是否对所有像素取平均,默认True
+        weight (float): 损失权重,默认1.0
+    """
     def __init__(self, window_size=11, size_average=True,weight=1.):
         super(SSIM, self).__init__()
-        self.window_size = window_size
-        self.size_average = size_average
-        self.channel = 1
-        self.window = create_window(window_size, self.channel)
-        self.weight = weight
+        self.window_size = window_size#高斯窗口大小
+        self.size_average = size_average#对所有像素取平均
+        self.channel = 1#通道数
+        self.window = create_window(window_size, self.channel)#创建窗口
+        self.weight = weight#权重
 
     def forward(self, img1, img2):
+        """
+        计算SSIM损失
+        
+        参数：
+            img1 (Tensor): 预测图像,shape: [N, C, H, W]
+            img2 (Tensor): 真实图像,shape: [N, C, H, W]
+        
+        返回：
+            loss (Tensor): SSIM损失值(标量)
+        """
+        # 步骤1：获取图像的通道数
         (_, channel, _, _) = img1.size()
-
+        # 例如：img1.shape = [8, 3, 256, 256]
+        # channel = 3（RGB三通道）
+        
+        # 步骤2：检查是否需要重新创建窗口
         if channel == self.channel and self.window.data.type() == img1.data.type():
+            # 通道数和数据类型都匹配,直接使用已有窗口
             window = self.window
         else:
+            # 通道数或数据类型不匹配,重新创建窗口
             window = create_window(self.window_size, channel)
-
+            
+            # 如果图像在GPU上,窗口也要移到GPU
             if img1.is_cuda:
                 window = window.cuda(img1.get_device())
+            # 确保窗口的数据类型与图像一致
             window = window.type_as(img1)
-
+            
+            # 更新存储的窗口和通道数
             self.window = window
             self.channel = channel
-
-        return (1. - map_ssim(img1, img2, window, self.window_size, channel, self.size_average)) * self.weight
+        
+        # 步骤3：计算SSIM值并转换为损失
+        ssim_value = map_ssim(img1, img2, window, self.window_size, channel, self.size_average)
+        # ssim_value: 范围[0, 1],越大越好
+        
+        # 转换为损失：(1 - SSIM) × weight
+        loss = (1. - ssim_value) * self.weight
+        
+        return loss
 
 
 
