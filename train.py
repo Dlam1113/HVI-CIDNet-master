@@ -15,6 +15,7 @@ from loss.losses import *
 from data.scheduler import *
 from tqdm import tqdm
 from datetime import datetime
+from torch.utils.tensorboard import SummaryWriter  # TensorBoard支持
 
 opt = option().parse_args()
 # opt 是一个 argparse.Namespace 对象
@@ -44,14 +45,24 @@ def train_init():
     if cuda and not torch.cuda.is_available():
         raise RuntimeError("No GPU found, please run without --cuda")
     
-def train(epoch):
+def train(epoch, writer=None):
+    """
+    训练一个epoch
+    
+    Args:
+        epoch: 当前epoch编号
+        writer: TensorBoard的SummaryWriter对象，用于记录训练过程
+    
+    Returns:
+        epoch_loss: 当前epoch的总损失
+        batch_count: 处理的batch数量
+    """
     model.train()
-    loss_print = 0      # 累积整个epoch的总损失
-    batch_cnt = 0         # 统计整个epoch处理的batch数量
-    loss_last = 0    # 累积当前epoch的损失（用于打印）
-    batch_last = 0     # 统计当前epoch的batch数量（用于打印）
-    train_len = len(training_data_loader)  # 关键：DataLoader的长度
+    epoch_loss = 0      # 累积整个epoch的总损失
+    batch_count = 0     # 统计整个epoch处理的batch数量
+    train_len = len(training_data_loader)  # DataLoader的长度
     iter = 0            # 当前epoch中已处理的batch计数器
+    
     torch.autograd.set_detect_anomaly(opt.grad_detect)
     for batch in tqdm(training_data_loader):
         im1, im2, path1, path2 = batch[0], batch[1], batch[2], batch[3]
@@ -97,19 +108,31 @@ def train(epoch):
         loss.backward()        # 反向传播
         optimizer.step()       # 更新模型参数
         
-        loss_print = loss_print + loss.item()
-        loss_last = loss_last + loss.item()
-        batch_cnt += 1
-        batch_last += 1
+        # 累积损失
+        epoch_loss += loss.item()
+        batch_count += 1
+        
         # 每个epoch结束时打印平均损失和学习率，并保存样本图像
         if iter == train_len:
-            print("===> Epoch[{}]: Loss: {:.4f} || Learning rate: lr={}.".format(epoch,
-                loss_last/batch_last, optimizer.param_groups[0]['lr']))
-            loss_last = 0
-            batch_last = 0
-            # 保存训练样本
-            output_img = transforms.ToPILImage()((output_rgb)[0].squeeze(0))#取出最后一个batch的第一个图像再转换为PIL图像
-            gt_img = transforms.ToPILImage()((gt_rgb)[0].squeeze(0))
+            avg_loss = epoch_loss / batch_count
+            current_lr = optimizer.param_groups[0]['lr']
+            
+            print("===> Epoch[{}]: Loss: {:.4f} || Learning rate: lr={:.6f}".format(
+                epoch, avg_loss, current_lr))
+            
+            # 【TensorBoard记录】记录训练损失和学习率
+            if writer is not None:
+                writer.add_scalar('Train/Loss', avg_loss, epoch)
+                writer.add_scalar('Train/Learning_Rate', current_lr, epoch)
+                
+                # 记录训练图像（可选）
+                # 将第一个batch的第一张图像记录到TensorBoard
+                writer.add_image('Train/Output_Image', output_rgb[0], epoch, dataformats='CHW')
+                writer.add_image('Train/Ground_Truth', gt_rgb[0], epoch, dataformats='CHW')
+            
+            # 保存训练样本到本地
+            output_img = transforms.ToPILImage()(output_rgb[0].squeeze(0))
+            gt_img = transforms.ToPILImage()(gt_rgb[0].squeeze(0))
             if not os.path.exists(opt.val_folder+'training'):          
                 os.mkdir(opt.val_folder+'training') 
             output_img.save(opt.val_folder+'training/test.png')
@@ -267,9 +290,17 @@ if __name__ == '__main__':
         start_epoch = opt.start_epoch
     if not os.path.exists(opt.val_folder):          
         os.mkdir(opt.val_folder) #opt.val_folder = 'results/'
+    
+    # 【TensorBoard初始化】创建TensorBoard写入器
+    # 生成带时间戳的日志目录，避免不同实验的日志混在一起
+    log_dir = f'./runs/experiment_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+    writer = SummaryWriter(log_dir)
+    print(f"===> TensorBoard日志保存在: {log_dir}")
+    print(f"===> 启动TensorBoard: tensorboard --logdir=runs")
         
     for epoch in range(start_epoch+1, opt.nEpochs + start_epoch + 1):
-        epoch_loss, batch_num = train(epoch)  # 训练一个epoch，返回这个epoch的总损失和处理的batch数量
+        # 训练一个epoch，传入writer用于记录
+        epoch_loss, batch_num = train(epoch, writer=writer)
         scheduler.step()  # 通过调度器更新学习率
 
         # 每隔一定epoch进行模型评估
@@ -316,18 +347,50 @@ if __name__ == '__main__':
             eval(model, testing_data_loader, model_out_path, opt.val_folder+output_folder, 
                  norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
             # 计算评估指标
-            avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)#use_GT_mean：是否使用亮度校正
+            avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)#metric就是评价指标的意思，use_GT_mean：是否使用亮度校正
             print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
             print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
             print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
+            
+            # 保存指标到列表
             psnr.append(avg_psnr)
             ssim.append(avg_ssim)
             lpips.append(avg_lpips)
+            
+            # 【TensorBoard记录】记录评估指标
+            writer.add_scalar('Eval/PSNR', avg_psnr, epoch)
+            writer.add_scalar('Eval/SSIM', avg_ssim, epoch)
+            writer.add_scalar('Eval/LPIPS', avg_lpips, epoch)
+            
+            # 同时在一个图中显示所有指标的变化趋势
+            writer.add_scalars('Eval/All_Metrics', {
+                'PSNR': avg_psnr,
+                'SSIM': avg_ssim * 30,  # 放大SSIM以便在同一图中观察
+                'LPIPS': avg_lpips * 100  # 放大LPIPS以便在同一图中观察
+            }, epoch)
+            
             print(psnr)
             print(ssim)
             print(lpips)
         torch.cuda.empty_cache()
-#将训练过程中的所有评估指标（PSNR、SSIM、LPIPS）和训练配置保存到一个格式化的 Markdown 文件中，便于后续查看和比较实验结果。    
+    # 【训练完成】关闭TensorBoard写入器
+    print("\n===> 训练完成！")
+    
+    # 记录最终的最佳结果到TensorBoard
+    if len(psnr) > 0:
+        best_psnr = max(psnr)
+        best_ssim = max(ssim)
+        best_lpips = min(lpips)
+        best_psnr_epoch = (psnr.index(best_psnr) + 1) * opt.snapshots
+        
+        writer.add_text('Final_Results/Best_PSNR', f'{best_psnr:.4f} at Epoch {best_psnr_epoch}')
+        writer.add_text('Final_Results/Best_SSIM', f'{best_ssim:.4f}')
+        writer.add_text('Final_Results/Best_LPIPS', f'{best_lpips:.4f}')
+    
+    writer.close()
+    print(f"===> TensorBoard日志已保存到: {log_dir}")
+    
+    #将训练过程中的所有评估指标（PSNR、SSIM、LPIPS）和训练配置保存到一个格式化的 Markdown 文件中，便于后续查看和比较实验结果。    
     now = datetime.now().strftime("%Y-%m-%d-%H%M%S")#获取当前日期并格式化时间字符串，（）里都是对应日期缩写eg：%Y是year
     with open(f"./results/training/metrics{now}.md", "w") as f:
         f.write("dataset: "+ output_folder + "\n")  
@@ -339,6 +402,7 @@ if __name__ == '__main__':
         f.write(f"D_weight: {opt.D_weight}\n")  
         f.write(f"E_weight: {opt.E_weight}\n")  
         f.write(f"P_weight: {opt.P_weight}\n")
+        f.write(f"TensorBoard日志: {log_dir}\n\n")
         best_psnr_idx = psnr.index(max(psnr))
         f.write("## 最佳结果\n\n")
         f.write(f"- **最佳PSNR**: {max(psnr):.4f} (Epoch {(best_psnr_idx+1)*opt.snapshots})\n")
