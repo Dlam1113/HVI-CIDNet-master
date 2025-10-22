@@ -32,9 +32,9 @@ def seed_torch(seed = 42):
     torch.cuda.manual_seed_all(seed) # PyTorch多GPU随机数种子
     os.environ['PYTHONHASHSEED'] = str(seed)  # Python哈希种子，针对dict和set中元素的存储顺序和遍历顺序
     
-    # 确保完全可重复性（会稍微降低训练速度）
-    torch.backends.cudnn.deterministic = True  # 使用确定性算法
-    torch.backends.cudnn.benchmark = False     # 关闭自动优化，确保可重复
+    # 确保完全可重复性（会稍微降低训练速度）因为显存满了所以更改了记一下
+    #torch.backends.cudnn.deterministic = True  # 使用确定性算法
+    torch.backends.cudnn.benchmark = True     # 关闭自动优化，确保可重复
     
 def train_init():
     """初始化训练环境"""
