@@ -114,7 +114,8 @@ def train(epoch):
                 os.mkdir(opt.val_folder+'training') 
             output_img.save(opt.val_folder+'training/test.png')
             gt_img.save(opt.val_folder+'training/gt.png')
-    return loss_print, batch_cnt
+    
+    return epoch_loss, batch_count
                 
 
 def checkpoint(epoch):
