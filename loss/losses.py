@@ -83,55 +83,49 @@ class EdgeLoss(nn.Module):
 
 
 class PerceptualLoss(nn.Module):
-    """Perceptual loss with commonly used style loss.
-
-    Args:
-        layer_weights (dict): The weight for each layer of vgg feature.
-            Here is an example: {'conv5_4': 1.}, which means the conv5_4
-            feature layer (before relu5_4) will be extracted with weight
-            1.0 in calculting losses.
-        vgg_type (str): The type of vgg network used as feature extractor.
-            Default: 'vgg19'.
-        use_input_norm (bool):  If True, normalize the input image in vgg.
-            Default: True.
-        range_norm (bool): If True, norm images with range [-1, 1] to [0, 1].
-            Default: False.
-        perceptual_weight (float): If `perceptual_weight > 0`, the perceptual
-            loss will be calculated and the loss will multiplied by the
-            weight. Default: 1.0.
-        style_weight (float): If `style_weight > 0`, the style loss will be
-            calculated and the loss will multiplied by the weight.
-            Default: 0.
-        criterion (str): Criterion used for perceptual loss. Default: 'l1'.
     """
-
+    感知损失（可选择性包含风格损失）
+    
+    核心思想：
+    - 在VGG特征空间中比较图像相似性
+    - 而非在像素空间中比较
+    """
+    
     def __init__(self,
-                 layer_weights,
-                 vgg_type='vgg19',
-                 use_input_norm=True,
-                 range_norm=True,
-                 perceptual_weight=1.0,
-                 style_weight=0.,
-                 criterion='l1'):
+                 layer_weights,         # 各层的权重字典
+                 vgg_type='vgg19',      # VGG类型
+                 use_input_norm=True,   # 是否归一化输入
+                 range_norm=True,       # 是否范围归一化
+                 perceptual_weight=1.0, # 感知损失权重
+                 style_weight=0.,       # 风格损失权重
+                 criterion='l1'):       # 损失函数类型
         super(PerceptualLoss, self).__init__()
-        self.perceptual_weight = perceptual_weight
-        self.style_weight = style_weight
-        self.layer_weights = layer_weights
+        
+        # ========== 保存参数 ==========
+        self.perceptual_weight = perceptual_weight  # 默认1.0
+        self.style_weight = style_weight            # 默认0（不使用）
+        self.layer_weights = layer_weights          # {'conv1_2': 1, ...}
+        
+        # ========== 创建VGG特征提取器 ==========
         self.vgg = VGGFeatureExtractor(
-            layer_name_list=list(layer_weights.keys()),
-            vgg_type=vgg_type,
-            use_input_norm=use_input_norm,
-            range_norm=range_norm)
-
-        self.criterion_type = criterion
+            layer_name_list=list(layer_weights.keys()),  # ['conv1_2', 'conv2_2', ...]
+            vgg_type=vgg_type,              # 'vgg19'
+            use_input_norm=use_input_norm,  # True
+            range_norm=range_norm)          # True
+        
+        # ========== 选择损失函数 ==========
+        self.criterion_type = criterion  # 'mse'
+        
         if self.criterion_type == 'l1':
             self.criterion = torch.nn.L1Loss()
         elif self.criterion_type == 'l2':
             self.criterion = torch.nn.L2loss()
         elif self.criterion_type == 'mse':
             self.criterion = torch.nn.MSELoss(reduction='mean')
+            # MSE = mean((x - y)²)
         elif self.criterion_type == 'fro':
             self.criterion = None
+            # Frobenius范数：||A||_F = sqrt(Σ(a_ij²))
         else:
             raise NotImplementedError(f'{criterion} criterion has not been supported.')
 
@@ -145,23 +139,44 @@ class PerceptualLoss(nn.Module):
         Returns:
             Tensor: Forward results.
         """
+        # 图像 → VGG网络 → 特征图 → 比较相似度
+                #       ↓
+                # 不同层捕获不同信息：
+                # - 浅层：纹理、颜色
+                # - 中层：形状、边缘
+                # - 深层：语义内容
         # extract vgg features
         x_features = self.vgg(x)
         gt_features = self.vgg(gt.detach())
 
-        # calculate perceptual loss
+        # calculate perceptual loss感知损失
+        # ========== 步骤2：计算感知损失 ==========
         if self.perceptual_weight > 0:
             percep_loss = 0
+            
             for k in x_features.keys():
+                # 遍历每一层：'conv1_2', 'conv2_2', 'conv3_4', 'conv4_4'
+                
                 if self.criterion_type == 'fro':
-                    percep_loss += torch.norm(x_features[k] - gt_features[k], p='fro') * self.layer_weights[k]
+                    # Frobenius范数
+                    percep_loss += torch.norm(
+                        x_features[k] - gt_features[k], p='fro'
+                    ) * self.layer_weights[k]
                 else:
-                    percep_loss += self.criterion(x_features[k], gt_features[k]) * self.layer_weights[k]
+                    # MSE损失（默认）
+                    layer_loss = self.criterion(x_features[k], gt_features[k])
+                    # layer_loss = mean((x_features[k] - gt_features[k])²)
+                    
+                    percep_loss += layer_loss * self.layer_weights[k]
+                    # 乘以该层的权重（本例中都是1）
+            
+            # 乘以总权重
             percep_loss *= self.perceptual_weight
+            # percep_loss = (loss_conv1_2 + loss_conv2_2 + loss_conv3_4 + loss_conv4_4) × 1.0
         else:
             percep_loss = None
 
-        # calculate style loss
+        # calculate style loss风格损失没用到
         if self.style_weight > 0:
             style_loss = 0
             for k in x_features.keys():

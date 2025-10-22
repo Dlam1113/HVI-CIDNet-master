@@ -50,7 +50,7 @@ def calculate_ssim(target, ref):
     img2 = np.array(ref, dtype=np.float64)
     if not img1.shape == img2.shape:
         raise ValueError('Input images must have the same dimensions.')
-    if img1.ndim == 2:
+    if img1.ndim == 2:#维度为2也就是灰度图像
         return ssim(img1, img2)
     elif img1.ndim == 3:
         if img1.shape[2] == 3:
@@ -77,11 +77,12 @@ def metrics(im_dir, label_dir, use_GT_mean):
     n = 0
     loss_fn = lpips.LPIPS(net='alex')
     loss_fn.cuda()
-    for item in tqdm(sorted(glob.glob(im_dir))):
+    for item in tqdm(sorted(glob.glob(im_dir))):#glob的作用是找出所有匹配PNG的文件sorted使对列表进行排序
         n += 1
         
         im1 = Image.open(item).convert('RGB') 
-        
+
+         # 跨平台路径处理（Windows用反斜杠，Linux用斜杠）
         os_name = platform.system()
         if os_name.lower() == 'windows':
             name = item.split('\\')[-1]
@@ -93,17 +94,22 @@ def metrics(im_dir, label_dir, use_GT_mean):
         im2 = Image.open(label_dir + name).convert('RGB')
         (h, w) = im2.size
         im1 = im1.resize((h, w))  
-        im1 = np.array(im1) 
+        im1 = np.array(im1) # 转为numpy数组 [H, W, 3]
         im2 = np.array(im2)
         
-        if use_GT_mean:
+        if use_GT_mean:  # 如果启用亮度校正，将预测图像的平均亮度调整到与真实图像相同，从而消除整体亮度偏差
+            # 计算预测图像的灰度均值
             mean_restored = cv2.cvtColor(im1, cv2.COLOR_RGB2GRAY).mean()
+            
+            # 计算真实图像的灰度均值
             mean_target = cv2.cvtColor(im2, cv2.COLOR_RGB2GRAY).mean()
+            
+            # 按比例调整预测图像的亮度，使其均值与GT一致
             im1 = np.clip(im1 * (mean_target/mean_restored), 0, 255)
         
         score_psnr = calculate_psnr(im1, im2)
         score_ssim = calculate_ssim(im1, im2)
-        ex_p0 = lpips.im2tensor(im1).cuda()
+        ex_p0 = lpips.im2tensor(im1).cuda()#把图片从numpy转换到Lpips需要的张量
         ex_ref = lpips.im2tensor(im2).cuda()
         
 

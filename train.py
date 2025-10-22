@@ -46,12 +46,12 @@ def train_init():
     
 def train(epoch):
     model.train()
-    loss_print = 0
-    pic_cnt = 0
-    loss_last_10 = 0
-    pic_last_10 = 0
-    train_len = len(training_data_loader)
-    iter = 0
+    loss_print = 0      # 累积整个epoch的总损失
+    batch_cnt = 0         # 统计整个epoch处理的batch数量
+    loss_last = 0    # 累积当前epoch的损失（用于打印）
+    batch_last = 0     # 统计当前epoch的batch数量（用于打印）
+    train_len = len(training_data_loader)  # 关键：DataLoader的长度
+    iter = 0            # 当前epoch中已处理的batch计数器
     torch.autograd.set_detect_anomaly(opt.grad_detect)
     for batch in tqdm(training_data_loader):
         im1, im2, path1, path2 = batch[0], batch[1], batch[2], batch[3]
@@ -83,6 +83,8 @@ def train(epoch):
         gt_hvi = model.HVIT(gt_rgb)
         loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
         loss_rgb = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
+        #             ↑                            ↑                            ↑                                ↑
+        #          像素精度                     结构相似性                     边缘损失                          感知损失
         loss = loss_rgb + opt.HVI_weight * loss_hvi
         iter += 1
         
@@ -93,26 +95,26 @@ def train(epoch):
         # 标准的反向传播过程
         optimizer.zero_grad()  # 清零梯度
         loss.backward()        # 反向传播
-        optimizer.step()       # 更新参数
+        optimizer.step()       # 更新模型参数
         
         loss_print = loss_print + loss.item()
-        loss_last_10 = loss_last_10 + loss.item()
-        pic_cnt += 1
-        pic_last_10 += 1
-        # 每个epoch结束时保存样本图像
+        loss_last = loss_last + loss.item()
+        batch_cnt += 1
+        batch_last += 1
+        # 每个epoch结束时打印平均损失和学习率，并保存样本图像
         if iter == train_len:
             print("===> Epoch[{}]: Loss: {:.4f} || Learning rate: lr={}.".format(epoch,
-                loss_last_10/pic_last_10, optimizer.param_groups[0]['lr']))
-            loss_last_10 = 0
-            pic_last_10 = 0
+                loss_last/batch_last, optimizer.param_groups[0]['lr']))
+            loss_last = 0
+            batch_last = 0
             # 保存训练样本
-            output_img = transforms.ToPILImage()((output_rgb)[0].squeeze(0))
+            output_img = transforms.ToPILImage()((output_rgb)[0].squeeze(0))#取出最后一个batch的第一个图像再转换为PIL图像
             gt_img = transforms.ToPILImage()((gt_rgb)[0].squeeze(0))
             if not os.path.exists(opt.val_folder+'training'):          
                 os.mkdir(opt.val_folder+'training') 
             output_img.save(opt.val_folder+'training/test.png')
             gt_img.save(opt.val_folder+'training/gt.png')
-    return loss_print, pic_cnt
+    return loss_print, batch_cnt
                 
 
 def checkpoint(epoch):
@@ -257,27 +259,27 @@ if __name__ == '__main__':
     psnr = []
     #结构相似性：是一种衡量两幅图像相似度的指标，常用于评估图像失真前后的相似性
     ssim = []
-    #学习感知图像块相似度也称感知损失
+    #学习感知图像块相似度也称感知损失，越低越好
     lpips = []
     start_epoch=0
     if opt.start_epoch > 0:
         start_epoch = opt.start_epoch
     if not os.path.exists(opt.val_folder):          
-        os.mkdir(opt.val_folder) 
+        os.mkdir(opt.val_folder) #opt.val_folder = 'results/'
         
     for epoch in range(start_epoch+1, opt.nEpochs + start_epoch + 1):
-        epoch_loss, pic_num = train(epoch)  # 训练一个epoch
-        scheduler.step()  # 更新学习率
+        epoch_loss, batch_num = train(epoch)  # 训练一个epoch，返回这个epoch的总损失和处理的batch数量
+        scheduler.step()  # 通过调度器更新学习率
 
         # 每隔一定epoch进行模型评估
         if epoch % opt.snapshots == 0:
-            model_out_path = checkpoint(epoch) 
-            norm_size = True
+            model_out_path = checkpoint(epoch) #每隔opt.snapshots个epoch保存一次模型
+            norm_size = True #是否将图像归一化（统一）到固定尺寸
 
             # LOL three subsets
             if opt.lol_v1:
-                output_folder = 'LOLv1/'
-                label_dir = opt.data_valgt_lol_v1
+                output_folder = 'LOLv1/'#模型生成的增强图像保存路径，保存在results/LOLv1/文件夹下
+                label_dir = opt.data_valgt_lol_v1#验证集真实图像保存路径，保存在datasets/LOLdataset/eval15/high/文件夹下
             if opt.lolv2_real:
                 output_folder = 'LOLv2_real/'
                 label_dir = opt.data_valgt_lolv2_real
@@ -293,7 +295,7 @@ if __name__ == '__main__':
             if opt.SID:
                 output_folder = 'SID/'
                 label_dir = opt.data_valgt_SID
-                npy = True
+                npy = True #没用到
             if opt.SICE_mix:
                 output_folder = 'SICE_mix/'
                 label_dir = opt.data_valgt_SICE_mix
@@ -308,12 +310,12 @@ if __name__ == '__main__':
                 label_dir = opt.data_valgt_fivek
                 norm_size = False
 
-            im_dir = opt.val_folder + output_folder + '*.png'
+            im_dir = opt.val_folder + output_folder + '*.png' #模型生成的增强图像的路径模式，匹配所有png文件
             # 在验证集上评估模型性能
             eval(model, testing_data_loader, model_out_path, opt.val_folder+output_folder, 
                  norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
             # 计算评估指标
-            avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)
+            avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)#use_GT_mean：是否使用亮度校正
             print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
             print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
             print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
@@ -324,8 +326,8 @@ if __name__ == '__main__':
             print(ssim)
             print(lpips)
         torch.cuda.empty_cache()
-    
-    now = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+#将训练过程中的所有评估指标（PSNR、SSIM、LPIPS）和训练配置保存到一个格式化的 Markdown 文件中，便于后续查看和比较实验结果。    
+    now = datetime.now().strftime("%Y-%m-%d-%H%M%S")#获取当前日期并格式化时间字符串，（）里都是对应日期缩写eg：%Y是year
     with open(f"./results/training/metrics{now}.md", "w") as f:
         f.write("dataset: "+ output_folder + "\n")  
         f.write(f"lr: {opt.lr}\n")  
@@ -335,7 +337,12 @@ if __name__ == '__main__':
         f.write(f"L1_weight: {opt.L1_weight}\n")  
         f.write(f"D_weight: {opt.D_weight}\n")  
         f.write(f"E_weight: {opt.E_weight}\n")  
-        f.write(f"P_weight: {opt.P_weight}\n")  
+        f.write(f"P_weight: {opt.P_weight}\n")
+        best_psnr_idx = psnr.index(max(psnr))
+        f.write("## 最佳结果\n\n")
+        f.write(f"- **最佳PSNR**: {max(psnr):.4f} (Epoch {(best_psnr_idx+1)*opt.snapshots})\n")
+        f.write(f"- **最佳SSIM**: {max(ssim):.4f}\n")
+        f.write(f"- **最低LPIPS**: {min(lpips):.4f}\n\n")  
         f.write("| Epochs | PSNR | SSIM | LPIPS |\n")  
         f.write("|----------------------|----------------------|----------------------|----------------------|\n")  
         for i in range(len(psnr)):

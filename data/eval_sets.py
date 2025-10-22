@@ -22,10 +22,11 @@ class SICEDatasetFromFolderEval(data.Dataset):
             input = self.transform(input)
             factor = 8  # 要求尺寸是8的倍数
             h, w = input.shape[1], input.shape[2]  # 获取当前图片的高度和宽度
-            H, W = ((h + factor) // factor) * factor, ((w + factor) // factor) * factor  # 计算目标尺寸
+            H, W = ((h + factor) // factor) * factor, ((w + factor) // factor) * factor  # "向上取整到因子8的倍数"
             padh = H - h if h % factor != 0 else 0  # 计算需要填充的高度
             padw = W - w if w % factor != 0 else 0  # 计算需要填充的宽度
-            input = F.pad(input.unsqueeze(0), (0,padw,0,padh), 'reflect').squeeze(0)  # 执行填充factor = 8
+            input = F.pad(input.unsqueeze(0), (0,padw,0,padh), 'reflect').squeeze(0)
+            #(0,padw,0,padh)是表示（左右上下）填充的像素值'reflect'是镜像反射边缘的像素。最后squeeze是把第0维度给去掉
             
         return input, file, h, w
 

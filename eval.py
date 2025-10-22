@@ -36,7 +36,8 @@ eval_parser.add_argument('--unpaired_weights', type=str, default='./weights/LOLv
 ep = eval_parser.parse_args()
 
 
-def eval(model, testing_data_loader, model_path, output_folder,norm_size=True,LOL=False,v2=False,unpaired=False,alpha=1.0,gamma=1.0):
+def eval(model, testing_data_loader, model_path, output_folder,norm_size=True,LOL=False,v2=False,unpaired=False,#unpaired是指未配对的数据集
+        alpha=1.0,gamma=1.0):
     torch.set_grad_enabled(False)
     model.load_state_dict(torch.load(model_path, map_location=lambda storage, loc: storage))
     print('Pre-trained model is loaded.')
@@ -63,13 +64,13 @@ def eval(model, testing_data_loader, model_path, output_folder,norm_size=True,LO
         if not os.path.exists(output_folder):          
             os.mkdir(output_folder)  
             
-        output = torch.clamp(output.cuda(),0,1).cuda()
+        output = torch.clamp(output,0,1).cuda()#将output中的值限制在（0，1）之间
         if not norm_size:
-            output = output[:, :, :h, :w]
+            output = output[:, :, :h, :w]#恢复到原来图片尺寸
         
         output_img = transforms.ToPILImage()(output.squeeze(0))
-        output_img.save(output_folder + name[0])
-        torch.cuda.empty_cache()
+        output_img.save(output_folder + name[0])#因为name是元组类型所以必须索引
+        torch.cuda.empty_cache()  #清理GPU缓存
     print('===> End evaluation')
     if LOL:
         model.trans.gated = False
