@@ -71,6 +71,16 @@ def option():
     parser.add_argument('--grad_detect', type=bool, default=False)  # 梯度爆炸检测
     parser.add_argument('--grad_clip', type=bool, default=True)     # 梯度裁剪
     
+    # ========== 双空间CIDNet配置（新增） ==========
+    parser.add_argument('--dual_space', type=bool, default=False, 
+                        help='是否使用DualSpaceCIDNet（HVI+RGB双空间融合）')
+    parser.add_argument('--RGB_loss_weight', type=float, default=0.5, 
+                        help='RGB分支损失权重')
+    parser.add_argument('--cross_space_attn', type=bool, default=True, 
+                        help='是否使用跨空间交叉注意力')
+    parser.add_argument('--fusion_type', type=str, default='learnable', 
+                        help='融合类型：learnable/adaptive')
+    
     
     # choose which dataset you want to train, please only set one "True"
     parser.add_argument('--lol_v1', type=bool, default=True)

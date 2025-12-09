@@ -256,4 +256,124 @@ class SSIM(torch.nn.Module):
         return loss
 
 
-
+class DualSpaceLoss(nn.Module):
+    """
+    双空间损失函数
+    
+    用于DualSpaceCIDNet的训练，同时计算：
+    1. 最终输出的损失
+    2. RGB分支输出的损失（新增）
+    3. HVI分支输出的损失（原有）
+    
+    总损失 = L_output + lambda_rgb * L_rgb + lambda_hvi * L_hvi
+    
+    参数:
+        L1_weight: L1损失权重，默认1.0
+        SSIM_weight: SSIM损失权重，默认0.5
+        Edge_weight: 边缘损失权重，默认50.0
+        Perceptual_weight: 感知损失权重，默认0.01
+        RGB_weight: RGB分支损失权重，默认0.5
+        HVI_weight: HVI分支损失权重，默认1.0
+    """
+    
+    def __init__(self,
+                 L1_weight=1.0,
+                 SSIM_weight=0.5,
+                 Edge_weight=50.0,
+                 Perceptual_weight=0.01,
+                 RGB_weight=0.5,
+                 HVI_weight=1.0):
+        super(DualSpaceLoss, self).__init__()
+        
+        # 保存权重
+        self.L1_weight = L1_weight
+        self.SSIM_weight = SSIM_weight
+        self.Edge_weight = Edge_weight
+        self.Perceptual_weight = Perceptual_weight
+        self.RGB_weight = RGB_weight
+        self.HVI_weight = HVI_weight
+        
+        # 各损失函数实例
+        self.L1_loss = L1Loss(loss_weight=1.0)
+        self.SSIM_loss = SSIM(weight=1.0)
+        self.Edge_loss = EdgeLoss(loss_weight=1.0)
+        
+        # 感知损失（可选）
+        if Perceptual_weight > 0:
+            self.Perceptual_loss = PerceptualLoss(
+                layer_weights={'conv1_2': 1, 'conv2_2': 1, 'conv3_4': 1, 'conv4_4': 1},
+                vgg_type='vgg19',
+                use_input_norm=True,
+                range_norm=True,
+                perceptual_weight=1.0,
+                style_weight=0,
+                criterion='mse'
+            )
+        else:
+            self.Perceptual_loss = None
+    
+    def forward(self, output, target, rgb_out=None, hvi_out=None):
+        """
+        计算双空间损失
+        
+        参数:
+            output: 最终融合输出 [B, 3, H, W]
+            target: 真值图像 [B, 3, H, W]
+            rgb_out: RGB分支输出 [B, 3, H, W]（可选）
+            hvi_out: HVI分支输出 [B, 3, H, W]（可选）
+        
+        返回:
+            total_loss: 总损失
+            loss_dict: 各部分损失的字典
+        """
+        loss_dict = {}
+        
+        # ========== 1. 最终输出损失 ==========
+        # L1损失
+        loss_L1 = self.L1_loss(output, target) * self.L1_weight
+        loss_dict['L1'] = loss_L1
+        
+        # SSIM损失
+        loss_SSIM = self.SSIM_loss(output, target) * self.SSIM_weight
+        loss_dict['SSIM'] = loss_SSIM
+        
+        # 边缘损失
+        loss_Edge = self.Edge_loss(output, target) * self.Edge_weight
+        loss_dict['Edge'] = loss_Edge
+        
+        # 感知损失
+        if self.Perceptual_loss is not None and self.Perceptual_weight > 0:
+            percep_loss, _ = self.Perceptual_loss(output, target)
+            loss_Perceptual = percep_loss * self.Perceptual_weight
+            loss_dict['Perceptual'] = loss_Perceptual
+        else:
+            loss_Perceptual = 0
+        
+        # 最终输出的总损失
+        loss_output = loss_L1 + loss_SSIM + loss_Edge + loss_Perceptual
+        loss_dict['output'] = loss_output
+        
+        # ========== 2. RGB分支损失（新增） ==========
+        if rgb_out is not None and self.RGB_weight > 0:
+            loss_rgb_L1 = self.L1_loss(rgb_out, target)
+            loss_rgb_SSIM = self.SSIM_loss(rgb_out, target)
+            loss_RGB = (loss_rgb_L1 + loss_rgb_SSIM * 0.5) * self.RGB_weight
+            loss_dict['RGB'] = loss_RGB
+        else:
+            loss_RGB = 0
+        
+        # ========== 3. HVI分支损失 ==========
+        if hvi_out is not None and self.HVI_weight > 0:
+            loss_hvi_L1 = self.L1_loss(hvi_out, target)
+            loss_hvi_SSIM = self.SSIM_loss(hvi_out, target)
+            loss_hvi_Edge = self.Edge_loss(hvi_out, target)
+            loss_HVI = (loss_hvi_L1 + loss_hvi_SSIM * 0.5 + loss_hvi_Edge * 50.0) * self.HVI_weight
+            loss_dict['HVI'] = loss_HVI
+        else:
+            loss_HVI = 0
+        
+        # ========== 总损失 ==========
+        total_loss = loss_output + loss_RGB + loss_HVI
+        loss_dict['total'] = total_loss
+        
+        return total_loss, loss_dict

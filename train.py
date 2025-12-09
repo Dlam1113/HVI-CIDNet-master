@@ -7,6 +7,7 @@ import torch.backends.cudnn as cudnn
 import numpy as np
 from torch.utils.data import DataLoader
 from net.CIDNet import CIDNet
+from net.DualSpaceCIDNet import DualSpaceCIDNet  # 双空间CIDNet
 from data.options import option
 from measure import metrics
 from eval import eval
@@ -72,31 +73,47 @@ def train(epoch, writer=None):
         # use random gamma function (enhancement curve) to improve generalization
         if opt.gamma:
             gamma = random.randint(opt.start_gamma,opt.end_gamma) / 100.0
-            output_rgb = model(im1 ** gamma) 
-            def data_augmentation_purpose():
-                    """
-                    Gamma数据增强在低光图像增强中的作用
-                    """
-                    # 1. 模拟不同的光照条件
-                    #    - gamma < 1.0: 模拟更暗的环境
-                    #    - gamma > 1.0: 模拟相对较亮的环境                    
-                    # 2. 提高模型的泛化能力  
-                    #    - 训练时见过各种亮度的图像
-                    #    - 测试时对不同光照条件更robust                   
-                    # 3. 增强模型的适应性
-                    #    - 学会处理各种程度的低光图像
-                    #    - 避免过拟合特定亮度的训练数据 
+            input_img = im1 ** gamma
         else:
-            output_rgb = model(im1)  
-            
+            input_img = im1
+        
         gt_rgb = im2
-        output_hvi = model.HVIT(output_rgb)
-        gt_hvi = model.HVIT(gt_rgb)
-        loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
-        loss_rgb = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
-        #             ↑                            ↑                            ↑                                ↑
-        #          像素精度                     结构相似性                     边缘损失                          感知损失
-        loss = loss_rgb + opt.HVI_weight * loss_hvi
+        
+        # ========== 前向传播（根据模型类型选择） ==========
+        if opt.dual_space:
+            # DualSpaceCIDNet：获取中间结果用于计算双空间损失
+            results = model.forward_with_intermediates(input_img)
+            output_rgb = results['output']
+            rgb_out = results['rgb_out']
+            hvi_out = results['hvi_out']
+            
+            # 计算双空间损失
+            output_hvi = model.HVIT(output_rgb)
+            gt_hvi = model.HVIT(gt_rgb)
+            
+            # 最终输出损失
+            loss_output = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
+            
+            # RGB分支损失（新增）
+            loss_rgb_branch = (L1_loss(rgb_out, gt_rgb) + D_loss(rgb_out, gt_rgb) * 0.5) * opt.RGB_loss_weight
+            
+            # HVI分支损失
+            loss_hvi_branch = (L1_loss(hvi_out, gt_rgb) + D_loss(hvi_out, gt_rgb) + E_loss(hvi_out, gt_rgb)) * opt.HVI_weight
+            
+            # HVI空间损失
+            loss_hvi_space = (L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi)) * opt.HVI_weight
+            
+            # 总损失
+            loss = loss_output + loss_rgb_branch + loss_hvi_branch + loss_hvi_space
+        else:
+            # 原CIDNet训练逻辑
+            output_rgb = model(input_img)
+            output_hvi = model.HVIT(output_rgb)
+            gt_hvi = model.HVIT(gt_rgb)
+            loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
+            loss_rgb = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
+            loss = loss_rgb + opt.HVI_weight * loss_hvi
+        
         iter += 1
         
         # 梯度裁剪防止梯度爆炸
@@ -206,15 +223,24 @@ def load_datasets():
     return training_data_loader, testing_data_loader
 
 def build_model():
-    """构建CIDNet模型"""
+    """构建CIDNet或DualSpaceCIDNet模型"""
     print('===> Building model ')
-    model = CIDNet().cuda()  # 创建模型并移到GPU
+    
+    # 根据配置选择模型
+    if opt.dual_space:
+        print('===> 使用 DualSpaceCIDNet (HVI+RGB双空间融合)')
+        model = DualSpaceCIDNet(
+            channels=[36, 36, 72, 144],
+            heads=[1, 2, 4, 8],
+            fusion_type=opt.fusion_type,
+            cross_space_attn=opt.cross_space_attn
+        ).cuda()
+    else:
+        print('===> 使用原始 CIDNet')
+        model = CIDNet().cuda()
+    
     if opt.start_epoch > 0:
         pth = f"./weights/train/epoch_{opt.start_epoch}.pth"
-        # torch.load(): 加载保存的模型权重文件
-        # map_location: 指定加载到哪个设备
-        #   - lambda storage, loc: storage 表示加载到原来保存时的设备
-        #   - 避免 GPU/CPU 之间的设备不匹配问题
         model.load_state_dict(torch.load(pth, map_location=lambda storage, loc: storage))
         print(f'===> 已加载预训练模型: {pth}')
     return model
