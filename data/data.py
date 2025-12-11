@@ -5,12 +5,17 @@ from data.SICE_blur_SID import *
 from data.fivek import *
 
 def transform1(size=256):
-    """训练时使用的数据变换，包含数据增强操作"""
+    if size <= 0:  # 不裁剪
+        return Compose([
+            RandomHorizontalFlip(),
+            RandomVerticalFlip(),
+            ToTensor(),
+        ])
     return Compose([
-        RandomCrop((size, size)),      # 随机裁剪到256x256
-        RandomHorizontalFlip(),        # 50%概率水平翻转
-        RandomVerticalFlip(),          # 50%概率垂直翻转
-        ToTensor(),                    # 转换为张量，值域[0,1]
+        RandomCrop((size, size)),
+        RandomHorizontalFlip(),
+        RandomVerticalFlip(),
+        ToTensor(),
     ])
 
 def transform2():
