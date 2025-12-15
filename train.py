@@ -66,6 +66,8 @@ def train(epoch, writer=None):
     train_len = len(training_data_loader)  # DataLoader的长度
     iter = 0            # 当前epoch中已处理的batch计数器
     
+    # 梯度累积设置：batchSize=4, accum_steps=2 等效于 batchSize=8
+    accum_steps = 2  # 累积步数（每2个batch更新一次参数）
     
     torch.autograd.set_detect_anomaly(opt.grad_detect)
     for batch in tqdm(training_data_loader):
@@ -118,14 +120,20 @@ def train(epoch, writer=None):
             loss = loss_rgb + opt.HVI_weight * loss_hvi
         
         iter += 1
-        if opt.grad_clip:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01, norm_type=2)
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
         
-        # 累积损失
-        epoch_loss += loss.item()
+        # 梯度累积：损失除以累积步数，保证梯度大小一致
+        loss = loss / accum_steps
+        loss.backward()  # 累积梯度（不清零）
+        
+        # 每accum_steps步更新一次参数
+        if iter % accum_steps == 0:
+            if opt.grad_clip:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01, norm_type=2)
+            optimizer.step()
+            optimizer.zero_grad()  # 更新后才清零
+        
+        # 累积损失（还原为原始损失值用于显示）
+        epoch_loss += loss.item() * accum_steps
         batch_count += 1
         
         # 每个epoch结束时打印平均损失和学习率，并保存样本图像
