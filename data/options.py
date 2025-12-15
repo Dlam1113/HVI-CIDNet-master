@@ -6,11 +6,11 @@ def option():
     parser = argparse.ArgumentParser(description='CIDNet')
 
     # 添加各种命令行参数
-    parser.add_argument('--batchSize', type=int, default=4, help='training batch size')
+    parser.add_argument('--batchSize', type=int, default=8, help='training batch size')
     parser.add_argument('--cropSize', type=int, default=400, help='image crop size (patch size)')
-    parser.add_argument('--nEpochs', type=int, default=3000, help='number of epochs to train for end')
+    parser.add_argument('--nEpochs', type=int, default=1500, help='number of epochs to train for end')
     parser.add_argument('--start_epoch', type=int, default=0, help='number of epochs to start, >0 is retrained a pre-trained pth')
-    parser.add_argument('--snapshots', type=int, default=100, help='Snapshots for save checkpoints pth')
+    parser.add_argument('--snapshots', type=int, default=50, help='Snapshots for save checkpoints pth')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate')
     parser.add_argument('--gpu_mode', type=bool, default=True)
     parser.add_argument('--shuffle', type=bool, default=True)
@@ -63,7 +63,7 @@ def option():
     parser.add_argument('--P_weight',  type=float, default=1e-2)
     
     # use random gamma function (enhancement curve) to improve generalization 使用随机gamma函数提高泛化能力
-    parser.add_argument('--gamma', type=bool, default=False)
+    parser.add_argument('--gamma', type=bool, default=True)
     parser.add_argument('--start_gamma', type=int, default=60)
     parser.add_argument('--end_gamma', type=int, default=120)
 
@@ -72,7 +72,7 @@ def option():
     parser.add_argument('--grad_clip', type=bool, default=True)     # 梯度裁剪
     
     # ========== 双空间CIDNet配置（新增） ==========
-    parser.add_argument('--dual_space', type=bool, default=False, 
+    parser.add_argument('--dual_space', type=bool, default=True, 
                         help='是否使用DualSpaceCIDNet（HVI+RGB双空间融合）')
     parser.add_argument('--RGB_loss_weight', type=float, default=0.5, 
                         help='RGB分支损失权重')
@@ -83,9 +83,9 @@ def option():
     
     
     # choose which dataset you want to train, please only set one "True"
-    parser.add_argument('--lol_v1', type=bool, default=False)
+    parser.add_argument('--lol_v1', type=bool, default=True)
     parser.add_argument('--lolv2_real', type=bool, default=False)
-    parser.add_argument('--lolv2_syn', type=bool, default=True)
+    parser.add_argument('--lolv2_syn', type=bool, default=False)
     parser.add_argument('--lol_blur', type=bool, default=False)
     parser.add_argument('--SID', type=bool, default=False)
     parser.add_argument('--SICE_mix', type=bool, default=False)
