@@ -348,73 +348,76 @@ if __name__ == '__main__':
         epoch_loss, batch_num = train(epoch, writer=writer, scaler=scaler)
         scheduler.step()  # 通过调度器更新学习率
 
-        
-        norm_size = True #是否将图像归一化（统一）到固定尺寸
-
-        # LOL three subsets
-        if opt.lol_v1:
-            output_folder = 'LOLv1/'#模型生成的增强图像保存路径，保存在results/LOLv1/文件夹下
-            label_dir = opt.data_valgt_lol_v1#验证集真实图像保存路径，保存在datasets/LOLdataset/eval15/high/文件夹下
-        if opt.lolv2_real:
-            output_folder = 'LOLv2_real/'
-            label_dir = opt.data_valgt_lolv2_real
-        if opt.lolv2_syn:
-            output_folder = 'LOLv2_syn/'
-            label_dir = opt.data_valgt_lolv2_syn
-            
-        # LOL-blur dataset with low_blur and high_sharp_scaled
-        if opt.lol_blur:
-            output_folder = 'LOL_blur/'
-            label_dir = opt.data_valgt_lol_blur
-                
-        if opt.SID:
-            output_folder = 'SID/'
-            label_dir = opt.data_valgt_SID
-            npy = True #没用到
-        if opt.SICE_mix:
-            output_folder = 'SICE_mix/'
-            label_dir = opt.data_valgt_SICE_mix
-            norm_size = False
-        if opt.SICE_grad:
-            output_folder = 'SICE_grad/'
-            label_dir = opt.data_valgt_SICE_grad
-            norm_size = False
-                
-        if opt.fivek:
-            output_folder = 'fivek/'
-            label_dir = opt.data_valgt_fivek
-            norm_size = False
-        
-
-        im_dir = opt.val_folder + output_folder + '*.png' #模型生成的增强图像的路径模式，匹配所有png文件
-        # 每隔一定epoch进行模型评估
         if epoch % opt.snapshots == 0:
             model_out_path = checkpoint(epoch) #每隔opt.snapshots个epoch保存一次模型
             # 在验证集上评估模型性能
+            norm_size = True #是否将图像归一化（统一）到固定尺寸
+
+            # LOL three subsets
+            if opt.lol_v1:
+                output_folder = 'LOLv1/'#模型生成的增强图像保存路径，保存在results/LOLv1/文件夹下
+                label_dir = opt.data_valgt_lol_v1#验证集真实图像保存路径，保存在datasets/LOLdataset/eval15/high/文件夹下
+            if opt.lolv2_real:
+                output_folder = 'LOLv2_real/'
+                label_dir = opt.data_valgt_lolv2_real
+            if opt.lolv2_syn:
+                output_folder = 'LOLv2_syn/'
+                label_dir = opt.data_valgt_lolv2_syn
+                
+            # LOL-blur dataset with low_blur and high_sharp_scaled
+            if opt.lol_blur:
+                output_folder = 'LOL_blur/'
+                label_dir = opt.data_valgt_lol_blur
+                    
+            if opt.SID:
+                output_folder = 'SID/'
+                label_dir = opt.data_valgt_SID
+                npy = True #没用到
+            if opt.SICE_mix:
+                output_folder = 'SICE_mix/'
+                label_dir = opt.data_valgt_SICE_mix
+                norm_size = False
+            if opt.SICE_grad:
+                output_folder = 'SICE_grad/'
+                label_dir = opt.data_valgt_SICE_grad
+                norm_size = False
+                    
+            if opt.fivek:
+                output_folder = 'fivek/'
+                label_dir = opt.data_valgt_fivek
+                norm_size = False
+            
+
+            im_dir = opt.val_folder + output_folder + '*.png' #模型生成的增强图像的路径模式，匹配所有png文件
+            # 每隔一定epoch进行模型评估
             eval(model, testing_data_loader, model_out_path, opt.val_folder+output_folder, 
-                norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
-        # 计算评估指标
-        avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)#metric就是评价指标的意思，use_GT_mean：是否使用亮度校正
-        print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
-        print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
-        print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
+                    norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
             
-        # 保存指标到列表
-        psnr.append(avg_psnr)
-        ssim.append(avg_ssim)
-        lpips.append(avg_lpips)
-            
-        # 【TensorBoard记录】记录评估指标
-        writer.add_scalar('Eval/PSNR', avg_psnr, epoch)
-        writer.add_scalar('Eval/SSIM', avg_ssim, epoch)
-        writer.add_scalar('Eval/LPIPS', avg_lpips, epoch)
-            
-        # 同时在一个图中显示所有指标的变化趋势
-        writer.add_scalars('Eval/All_Metrics', {
-            'PSNR': avg_psnr,
-            'SSIM': avg_ssim * 30,  # 放大SSIM以便在同一图中观察
-            'LPIPS': avg_lpips * 100  # 放大LPIPS以便在同一图中观察
-        }, epoch)
+            # 计算评估指标
+            avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)#metric就是评价指标的意思，use_GT_mean：是否使用亮度校正
+            print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
+            print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
+            print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
+                
+            # 保存指标到列表
+            psnr.append(avg_psnr)
+            ssim.append(avg_ssim)
+            lpips.append(avg_lpips)
+                
+            # 【TensorBoard记录】记录评估指标
+            writer.add_scalar('Eval/PSNR', avg_psnr, epoch)
+            writer.add_scalar('Eval/SSIM', avg_ssim, epoch)
+            writer.add_scalar('Eval/LPIPS', avg_lpips, epoch)
+                
+            # 同时在一个图中显示所有指标的变化趋势
+            writer.add_scalars('Eval/All_Metrics', {
+                'PSNR': avg_psnr,
+                'SSIM': avg_ssim * 30,  # 放大SSIM以便在同一图中观察
+                'LPIPS': avg_lpips * 100  # 放大LPIPS以便在同一图中观察
+            }, epoch)
+            print(psnr)
+            print(ssim)
+            print(lpips)
             
         
         torch.cuda.empty_cache()
@@ -456,5 +459,5 @@ if __name__ == '__main__':
         f.write("| Epochs | PSNR | SSIM | LPIPS |\n")  
         f.write("|----------------------|----------------------|----------------------|----------------------|\n")  
         for i in range(len(psnr)):
-            f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | { psnr[i*opt.snapshots]:.4f} | {ssim[i*opt.snapshots]:.4f} | {lpips[i*opt.snapshots]:.4f} |\n")  
+            f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | { psnr[i]:.4f} | {ssim[i]:.4f} | {lpips[i]:.4f} |\n")  
         
