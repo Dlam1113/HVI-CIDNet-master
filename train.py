@@ -17,7 +17,7 @@ from data.scheduler import *
 from tqdm import tqdm
 from datetime import datetime
 from torch.utils.tensorboard import SummaryWriter  # TensorBoard支持
-from torch.cuda.amp import autocast, GradScaler  # 混合精度训练
+
 
 opt = option().parse_args()
 # opt 是一个 argparse.Namespace 对象
@@ -47,14 +47,14 @@ def train_init():
     if cuda and not torch.cuda.is_available():
         raise RuntimeError("No GPU found, please run without --cuda")
     
-def train(epoch, writer=None, scaler=None):
+def train(epoch, writer=None):
     """
     训练一个epoch
     
     Args:
         epoch: 当前epoch编号
         writer: TensorBoard的SummaryWriter对象，用于记录训练过程
-        scaler: GradScaler对象，用于混合精度训练
+        
     
     Returns:
         epoch_loss: 当前epoch的总损失
@@ -65,7 +65,7 @@ def train(epoch, writer=None, scaler=None):
     batch_count = 0     # 统计整个epoch处理的batch数量
     train_len = len(training_data_loader)  # DataLoader的长度
     iter = 0            # 当前epoch中已处理的batch计数器
-    use_amp = scaler is not None  # 是否使用混合精度
+    
     
     torch.autograd.set_detect_anomaly(opt.grad_detect)
     for batch in tqdm(training_data_loader):
@@ -82,69 +82,47 @@ def train(epoch, writer=None, scaler=None):
         
         gt_rgb = im2
         
-        # ========== 前向传播（使用混合精度） ==========
-        with autocast(enabled=use_amp):
-            if opt.dual_space:
-                # DualSpaceCIDNet：获取中间结果用于计算双空间损失
-                results = model.forward_with_intermediates(input_img)
-                output_rgb = results['output']
-                rgb_out = results['rgb_out']
-                hvi_out = results['hvi_out']
+       
+        if opt.dual_space:
+            # DualSpaceCIDNet：获取中间结果用于计算双空间损失
+            results = model.forward_with_intermediates(input_img)
+            output_rgb = results['output']
+            rgb_out = results['rgb_out']
+            hvi_out = results['hvi_out']
                 
-                # 计算双空间损失
-                output_hvi = model.HVIT(output_rgb)
-                gt_hvi = model.HVIT(gt_rgb)
+            # 计算双空间损失
+            output_hvi = model.HVIT(output_rgb)
+            gt_hvi = model.HVIT(gt_rgb)
                 
-                # 最终输出损失
-                loss_output = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
+            # 最终输出损失
+            loss_output = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
                 
-                # RGB分支损失（新增）
-                loss_rgb_branch = (L1_loss(rgb_out, gt_rgb) + D_loss(rgb_out, gt_rgb) * 0.5) * opt.RGB_loss_weight
+            # RGB分支损失（新增）
+            loss_rgb_branch = (L1_loss(rgb_out, gt_rgb) + D_loss(rgb_out, gt_rgb) * 0.5) * opt.RGB_loss_weight
                 
-                # HVI分支损失
-                loss_hvi_branch = (L1_loss(hvi_out, gt_rgb) + D_loss(hvi_out, gt_rgb) + E_loss(hvi_out, gt_rgb)) * opt.HVI_weight
+            # HVI分支损失
+            loss_hvi_branch = (L1_loss(hvi_out, gt_rgb) + D_loss(hvi_out, gt_rgb) + E_loss(hvi_out, gt_rgb)) * opt.HVI_weight
                 
-                # HVI空间损失
-                loss_hvi_space = (L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi)) * opt.HVI_weight
+            # HVI空间损失
+            loss_hvi_space = (L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi)) * opt.HVI_weight
                 
-                # 总损失
-                loss = loss_output + loss_rgb_branch + loss_hvi_branch + loss_hvi_space
-            else:
-                # 原CIDNet训练逻辑
-                output_rgb = model(input_img)
-                output_hvi = model.HVIT(output_rgb)
-                gt_hvi = model.HVIT(gt_rgb)
-                loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
-                loss_rgb = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
-                loss = loss_rgb + opt.HVI_weight * loss_hvi
+            # 总损失
+            loss = loss_output + loss_rgb_branch + loss_hvi_branch + loss_hvi_space
+        else:
+            # 原CIDNet训练逻辑
+            output_rgb = model(input_img)
+            output_hvi = model.HVIT(output_rgb)
+            gt_hvi = model.HVIT(gt_rgb)
+            loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
+            loss_rgb = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
+            loss = loss_rgb + opt.HVI_weight * loss_hvi
         
         iter += 1
-        
-        # # ========== NaN检测：跳过异常batch ==========
-        # if torch.isnan(loss) or torch.isinf(loss):
-        #     print(f"\n警告: 检测到NaN/Inf损失，跳过此batch")
-        #     optimizer.zero_grad()
-        #     if use_amp:
-        #         scaler.update()  # 重置scaler状态
-        #     continue
-        
-        # ========== 反向传播（使用混合精度） ==========
+        if opt.grad_clip:
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01, norm_type=2)
         optimizer.zero_grad()
-        
-        if use_amp:
-            # 混合精度：使用scaler缩放梯度
-            scaler.scale(loss).backward()
-            if opt.grad_clip:
-                scaler.unscale_(optimizer)
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01, norm_type=2)
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            # 标准精度
-            loss.backward()
-            if opt.grad_clip:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01, norm_type=2)
-            optimizer.step()
+        loss.backward()
+        optimizer.step()
         
         # 累积损失
         epoch_loss += loss.item()
@@ -345,15 +323,11 @@ if __name__ == '__main__':
     print(f"===> TensorBoard日志保存在: {log_dir}")
     print(f"===> 启动TensorBoard: tensorboard --logdir=runs")
     
-    # 【混合精度训练】初始化GradScaler（默认启用，可减少30-40%显存）
-    use_amp = True  # 设为False可禁用混合精度
-    scaler = GradScaler() if use_amp else None
-    if use_amp:
-        print("===> 已启用混合精度训练(AMP)，显存占用将减少30-40%")
+    
         
     for epoch in range(start_epoch+1, opt.nEpochs + start_epoch + 1):
-        # 训练一个epoch，传入writer和scaler用于记录和混合精度
-        epoch_loss, batch_num = train(epoch, writer=writer, scaler=scaler)
+        # 训练一个epoch，传入writer
+        epoch_loss, batch_num = train(epoch, writer=writer)
         scheduler.step()  # 通过调度器更新学习率
 
         if epoch % opt.snapshots == 0:
