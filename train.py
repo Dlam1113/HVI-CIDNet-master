@@ -120,6 +120,14 @@ def train(epoch, writer=None, scaler=None):
         
         iter += 1
         
+        # # ========== NaN检测：跳过异常batch ==========
+        # if torch.isnan(loss) or torch.isinf(loss):
+        #     print(f"\n警告: 检测到NaN/Inf损失，跳过此batch")
+        #     optimizer.zero_grad()
+        #     if use_amp:
+        #         scaler.update()  # 重置scaler状态
+        #     continue
+        
         # ========== 反向传播（使用混合精度） ==========
         optimizer.zero_grad()
         

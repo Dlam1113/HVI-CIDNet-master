@@ -68,7 +68,7 @@ def option():
     parser.add_argument('--end_gamma', type=int, default=120)
 
     # auto grad, turn off to speed up training
-    parser.add_argument('--grad_detect', type=bool, default=False)  # 梯度爆炸检测
+    parser.add_argument('--grad_detect', type=bool, default=True)  # 梯度爆炸检测
     parser.add_argument('--grad_clip', type=bool, default=True)     # 梯度裁剪
     
     # ========== 双空间CIDNet配置（新增） ==========
