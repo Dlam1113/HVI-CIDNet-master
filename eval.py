@@ -59,12 +59,18 @@ def eval(model, testing_data_loader, model_path, output_folder,norm_size=True,LO
                 input, name, h, w = batch[0], batch[1], batch[2], batch[3]
             
             input = input.cuda()
-            output = model(input**gamma) 
+            result = model(input**gamma)
+            
+            # 兼容DualSpaceCIDNet返回dict的情况
+            if isinstance(result, dict):
+                output = result['output']
+            else:
+                output = result
             
         if not os.path.exists(output_folder):          
             os.mkdir(output_folder)  
             
-        output = torch.clamp(output,0,1).cuda()#将output中的值限制在（0，1）之间
+        output = torch.clamp(output, 0, 1).cuda()  # 将output中的值限制在（0，1）之间
         if not norm_size:
             output = output[:, :, :h, :w]#恢复到原来图片尺寸
         
