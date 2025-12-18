@@ -93,27 +93,6 @@ class LearnableFusion(nn.Module):
         # 加权融合
         output = w_rgb * rgb_out + w_hvi * hvi_out
         
-        return output
-    
-    def forward_with_weights(self, rgb_out, hvi_out, x_input=None):
-        """
-        前向传播，同时返回权重图（用于可视化分析）
-        
-        返回:
-            (融合输出, RGB权重图, HVI权重图)
-        """
-        if self.use_input and x_input is not None:
-            weight_input = torch.cat([rgb_out, hvi_out, x_input], dim=1)
-        else:
-            weight_input = torch.cat([rgb_out, hvi_out], dim=1)
-        
-        weights = self.weight_net(weight_input)
-        weights = F.softmax(weights, dim=1)
-        w_rgb = weights[:, 0:1, :, :]
-        w_hvi = weights[:, 1:2, :, :]
-        
-        output = w_rgb * rgb_out + w_hvi * hvi_out
-        
         return output, w_rgb, w_hvi
 
 class AdaptiveFusion(nn.Module):
@@ -162,10 +141,11 @@ class AdaptiveFusion(nn.Module):
         前向传播
         
         返回:
-            融合输出
+            (融合输出, RGB权重图, HVI权重图)
         """
-        output, _, _, _ = self.forward_with_analysis(rgb_out, hvi_out, x_input)
-        return output
+        output, w_rgb, lum_attn, tex_attn = self.forward_with_analysis(rgb_out, hvi_out, x_input)
+        w_hvi = 1 - w_rgb  # HVI权重 = 1 - RGB权重
+        return output, w_rgb, w_hvi
     
     def forward_with_analysis(self, rgb_out, hvi_out, x_input):
         """
@@ -404,8 +384,7 @@ if __name__ == '__main__':
     # 测试1: LearnableFusion
     print("\n[测试1] LearnableFusion (可学习融合)")
     fusion1 = LearnableFusion(in_channels=3, mid_channels=32, use_input=True)
-    out1 = fusion1(rgb_out, hvi_out, x_input)
-    out1_w, w_rgb, w_hvi = fusion1.forward_with_weights(rgb_out, hvi_out, x_input)
+    out1, w_rgb, w_hvi = fusion1(rgb_out, hvi_out, x_input)
     print(f"  输出形状: {out1.shape}")
     print(f"  RGB权重范围: [{w_rgb.min().item():.4f}, {w_rgb.max().item():.4f}]")
     print(f"  HVI权重范围: [{w_hvi.min().item():.4f}, {w_hvi.max().item():.4f}]")

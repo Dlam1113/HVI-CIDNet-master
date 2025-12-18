@@ -240,111 +240,6 @@ class FeedForward(nn.Module):
         return x + out  # 残差连接
 
 
-class MultiScaleCrossAttention(nn.Module):
-    """
-    多尺度跨空间交叉注意力（建设性建议1的实现）
-    
-    在多个尺度上进行RGB-HVI信息交换，实现更全面的特征融合
-    
-    参数:
-        channels: 各尺度通道数列表 [ch1, ch2, ch3, ch4]
-        heads: 各尺度注意力头数列表 [h1, h2, h3, h4]
-    """
-    
-    def __init__(self, channels=[36, 36, 72, 144], heads=[1, 2, 4, 8]):
-        super().__init__()
-        
-        self.num_scales = len(channels)
-        
-        # 每个尺度的双向交叉注意力
-        self.cross_attns = nn.ModuleList([
-            BidirectionalCrossAttention(ch, h) 
-            for ch, h in zip(channels, heads)
-        ])
-        
-    def forward(self, rgb_feats, hvi_feats):
-        """
-        多尺度交叉注意力
-        
-        参数:
-            rgb_feats: RGB特征列表 [feat0, feat1, feat2, feat3]
-            hvi_feats: HVI特征列表 [feat0, feat1, feat2, feat3]
-            
-        返回:
-            (增强的RGB特征列表, 增强的HVI特征列表)
-        """
-        enhanced_rgb = []
-        enhanced_hvi = []
-        
-        for i in range(self.num_scales):
-            rgb_en, hvi_en = self.cross_attns[i](rgb_feats[i], hvi_feats[i])
-            enhanced_rgb.append(rgb_en)
-            enhanced_hvi.append(hvi_en)
-            
-        return enhanced_rgb, enhanced_hvi
-
-
-class ProgressiveCrossAttention(nn.Module):
-    """
-    渐进式跨空间注意力（建设性建议2的实现）
-    
-    支持训练过程中动态调整RGB和HVI的融合权重
-    训练初期以HVI为主，逐渐增加RGB的贡献
-    
-    参数:
-        dim: 特征维度
-        num_heads: 注意力头数
-        init_rgb_weight: 初始RGB权重，默认0.0
-    """
-    
-    def __init__(self, dim, num_heads=4, init_rgb_weight=0.0):
-        super().__init__()
-        
-        # 双向交叉注意力
-        self.cross_attn = BidirectionalCrossAttention(dim, num_heads)
-        
-        # 可学习的混合权重
-        self.rgb_weight = nn.Parameter(torch.tensor(init_rgb_weight))
-        
-        # 或者使用注册的buffer来存储当前训练进度权重
-        self.register_buffer('progress_weight', torch.tensor(0.0))
-        
-    def set_progress(self, progress_ratio):
-        """
-        设置训练进度，用于调整RGB权重
-        
-        参数:
-            progress_ratio: 训练进度 [0, 1]
-        """
-        # 渐进式增加RGB权重，从0到0.5
-        target_weight = min(0.5, progress_ratio * 0.5)
-        self.progress_weight.fill_(target_weight)
-        
-    def forward(self, rgb_feat, hvi_feat, use_progress=True):
-        """
-        前向传播
-        
-        参数:
-            rgb_feat: RGB特征
-            hvi_feat: HVI特征
-            use_progress: 是否使用渐进式权重
-        """
-        # 交叉注意力增强
-        rgb_enhanced, hvi_enhanced = self.cross_attn(rgb_feat, hvi_feat)
-        
-        if use_progress:
-            # 使用渐进式权重
-            weight = torch.sigmoid(self.rgb_weight) * self.progress_weight
-        else:
-            weight = torch.sigmoid(self.rgb_weight)
-        
-        # 加权融合
-        rgb_out = weight * rgb_enhanced + (1 - weight) * rgb_feat
-        hvi_out = weight * hvi_enhanced + (1 - weight) * hvi_feat
-        
-        return rgb_out, hvi_out
-
-
 # ==========  测试代码  ==========
 if __name__ == '__main__':
     print("=" * 60)
@@ -401,55 +296,9 @@ if __name__ == '__main__':
     assert ffn_out.shape == rgb_feat.shape, "输出形状错误！"
     print("  [OK] 测试通过")
     
-    # 测试4: MultiScaleCrossAttention
-    print("\n[测试4] MultiScaleCrossAttention (多尺度交叉注意力)")
-    channels = [36, 36, 72, 144]
-    heads = [1, 2, 4, 8]
-    
-    # 构造多尺度特征
-    rgb_feats = [
-        torch.randn(batch_size, 36, 256, 256),
-        torch.randn(batch_size, 36, 128, 128),
-        torch.randn(batch_size, 72, 64, 64),
-        torch.randn(batch_size, 144, 32, 32),
-    ]
-    hvi_feats = [
-        torch.randn(batch_size, 36, 256, 256),
-        torch.randn(batch_size, 36, 128, 128),
-        torch.randn(batch_size, 72, 64, 64),
-        torch.randn(batch_size, 144, 32, 32),
-    ]
-    
-    ms_cross_attn = MultiScaleCrossAttention(channels, heads)
-    rgb_outs, hvi_outs = ms_cross_attn(rgb_feats, hvi_feats)
-    
-    print(f"  Scale 0 - RGB: {rgb_outs[0].shape}, HVI: {hvi_outs[0].shape}")
-    print(f"  Scale 1 - RGB: {rgb_outs[1].shape}, HVI: {hvi_outs[1].shape}")
-    print(f"  Scale 2 - RGB: {rgb_outs[2].shape}, HVI: {hvi_outs[2].shape}")
-    print(f"  Scale 3 - RGB: {rgb_outs[3].shape}, HVI: {hvi_outs[3].shape}")
-    print(f"  参数量: {sum(p.numel() for p in ms_cross_attn.parameters()):,}")
-    
-    for i in range(4):
-        assert rgb_outs[i].shape == rgb_feats[i].shape, f"Scale {i} RGB形状错误！"
-        assert hvi_outs[i].shape == hvi_feats[i].shape, f"Scale {i} HVI形状错误！"
-    print("  [OK] 测试通过")
-    
-    # 测试5: ProgressiveCrossAttention
-    print("\n[测试5] ProgressiveCrossAttention (渐进式交叉注意力)")
-    prog_cross_attn = ProgressiveCrossAttention(dim, num_heads)
-    
-    # 模拟不同训练阶段
-    for progress in [0.0, 0.5, 1.0]:
-        prog_cross_attn.set_progress(progress)
-        rgb_out, hvi_out = prog_cross_attn(rgb_feat, hvi_feat)
-        print(f"  训练进度 {progress:.0%} - RGB权重缓冲: {prog_cross_attn.progress_weight.item():.3f}")
-    
-    print(f"  参数量: {sum(p.numel() for p in prog_cross_attn.parameters()):,}")
-    print("  [OK] 测试通过")
-    
     # GPU测试
     if torch.cuda.is_available():
-        print("\n[测试6] GPU兼容性测试")
+        print("\n[测试4] GPU兼容性测试")
         rgb_cuda = rgb_feat.cuda()
         hvi_cuda = hvi_feat.cuda()
         bi_cross_attn_cuda = BidirectionalCrossAttention(dim, num_heads).cuda()
@@ -457,7 +306,7 @@ if __name__ == '__main__':
         print(f"  GPU设备: {rgb_out_cuda.device}")
         print("  [OK] GPU测试通过")
     else:
-        print("\n[测试6] GPU不可用，跳过GPU测试")
+        print("\n[测试4] GPU不可用，跳过GPU测试")
     
     print("\n" + "=" * 60)
     print("所有测试通过！跨空间交叉注意力模块可正常使用。")

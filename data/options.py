@@ -15,6 +15,7 @@ def option():
     parser.add_argument('--gpu_mode', type=bool, default=True)
     parser.add_argument('--shuffle', type=bool, default=True)
     parser.add_argument('--threads', type=int, default=16, help='number of threads for dataloader to use')
+    parser.add_argument('--accum_steps', type=int, default=1, help='gradient accumulation steps')
 
     # choose a scheduler 学习率调度器的作用是使学习率周期性变化帮助模型跳过局部最优解
     parser.add_argument('--cos_restart_cyclic', type=bool, default=False)

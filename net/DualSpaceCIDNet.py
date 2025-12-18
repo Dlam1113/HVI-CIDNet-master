@@ -138,7 +138,12 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
             x: 输入RGB图像 [B, 3, H, W]
             
         返回:
-            增强后的RGB图像 [B, 3, H, W]
+            dict: {
+                'output': 最终输出,
+                'rgb_out': RGB分支输出,
+                'hvi_out': HVI分支输出,
+                'fusion_weights': 融合权重（如果使用LearnableFusion）
+        }
         """
         dtypes = x.dtype
         
@@ -206,7 +211,7 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         i_dec0 = self.ID_block0(i_dec1)
         
         hv_1 = self.HVD_block1(hv_1, hv_jump0)
-        hv_0 = self.HVD_block0(hv_1)
+        
         
         # ========== Step 6: RGB-HVI跨空间交叉注意力 ==========
         if self.cross_space_attn:
@@ -219,13 +224,14 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
             
             # 双向交叉注意力
             rgb_feat_enhanced, hvi_feat_enhanced = self.cross_attn(rgb_feat_down, hvi_feat)
-            
+
             # 上采样回原始尺寸
             rgb_feat_enhanced = nn.functional.interpolate(
-                rgb_feat_enhanced, size=x.shape[2:], mode='bilinear', align_corners=False
-            )
+                rgb_feat_enhanced, size=x.shape[2:], mode='bilinear', align_corners=False)
+            hv_0 = self.HVD_block0(hvi_feat_enhanced)
         else:
             rgb_feat_enhanced = rgb_feat
+            hv_0 = self.HVD_block0(hv_1)
         
         # ========== Step 7: 生成两个分支的RGB输出 ==========
         # HVI分支输出
@@ -236,103 +242,8 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         rgb_rgb = self.rgb_head(rgb_feat_enhanced)
         
         # ========== Step 8: 可学习权重融合 ==========
-        output = self.fusion(rgb_rgb, hvi_rgb, x)
-        
-        return output
-    
-    def forward_with_intermediates(self, x):
-        """
-        前向传播，返回中间结果（用于损失计算和可视化）
-        
-        返回:
-            dict: {
-                'output': 最终输出,
-                'rgb_out': RGB分支输出,
-                'hvi_out': HVI分支输出,
-                'fusion_weights': 融合权重（如果使用LearnableFusion）
-            }
-        """
-        dtypes = x.dtype
-        
-        # HVI转换
-        hvi = self.trans.HVIT(x)
-        i = hvi[:, 2, :, :].unsqueeze(1).to(dtypes)
-        
-        # RGB编码
-        rgb_feat = self.rgb_encoder(x)
-        
-        # HVI编码解码（同forward）
-        i_enc0 = self.IE_block0(i)
-        i_enc1 = self.IE_block1(i_enc0)
-        hv_0 = self.HVE_block0(hvi)
-        hv_1 = self.HVE_block1(hv_0)
-        i_jump0 = i_enc0
-        hv_jump0 = hv_0
-        
-        i_enc2 = self.I_LCA1(i_enc1, hv_1)
-        hv_2 = self.HV_LCA1(hv_1, i_enc1)
-        v_jump1 = i_enc2
-        hv_jump1 = hv_2
-        
-        i_enc2 = self.IE_block2(i_enc2)
-        hv_2 = self.HVE_block2(hv_2)
-        
-        i_enc3 = self.I_LCA2(i_enc2, hv_2)
-        hv_3 = self.HV_LCA2(hv_2, i_enc2)
-        v_jump2 = i_enc3
-        hv_jump2 = hv_3
-        
-        i_enc3 = self.IE_block3(i_enc2)
-        hv_3 = self.HVE_block3(hv_2)
-        
-        i_enc4 = self.I_LCA3(i_enc3, hv_3)
-        hv_4 = self.HV_LCA3(hv_3, i_enc3)
-        
-        i_dec4 = self.I_LCA4(i_enc4, hv_4)
-        hv_4 = self.HV_LCA4(hv_4, i_enc4)
-        
-        hv_3 = self.HVD_block3(hv_4, hv_jump2)
-        i_dec3 = self.ID_block3(i_dec4, v_jump2)
-        
-        i_dec2 = self.I_LCA5(i_dec3, hv_3)
-        hv_2 = self.HV_LCA5(hv_3, i_dec3)
-        
-        hv_2 = self.HVD_block2(hv_2, hv_jump1)
-        i_dec2 = self.ID_block2(i_dec3, v_jump1)
-        
-        i_dec1 = self.I_LCA6(i_dec2, hv_2)
-        hv_1 = self.HV_LCA6(hv_2, i_dec2)
-        
-        i_dec1 = self.ID_block1(i_dec1, i_jump0)
-        i_dec0 = self.ID_block0(i_dec1)
-        hv_1 = self.HVD_block1(hv_1, hv_jump0)
-        hv_0 = self.HVD_block0(hv_1)
-        
-        # 跨空间注意力
-        if self.cross_space_attn:
-            hvi_feat = hv_1
-            rgb_feat_down = nn.functional.interpolate(
-                rgb_feat, size=hvi_feat.shape[2:], mode='bilinear', align_corners=False
-            )
-            rgb_feat_enhanced, _ = self.cross_attn(rgb_feat_down, hvi_feat)
-            rgb_feat_enhanced = nn.functional.interpolate(
-                rgb_feat_enhanced, size=x.shape[2:], mode='bilinear', align_corners=False
-            )
-        else:
-            rgb_feat_enhanced = rgb_feat
-        
-        # 生成输出
-        output_hvi = torch.cat([hv_0, i_dec0], dim=1) + hvi
-        hvi_rgb = self.trans.PHVIT(output_hvi)
-        rgb_rgb = self.rgb_head(rgb_feat_enhanced)
-        
-        # 融合（带权重输出）
-        if hasattr(self.fusion, 'forward_with_weights'):
-            output, w_rgb, w_hvi = self.fusion.forward_with_weights(rgb_rgb, hvi_rgb, x)
-            fusion_weights = {'rgb': w_rgb, 'hvi': w_hvi}
-        else:
-            output = self.fusion(rgb_rgb, hvi_rgb, x)
-            fusion_weights = None
+        output, w_rgb, w_hvi = self.fusion(rgb_rgb, hvi_rgb, x)
+        fusion_weights = {'rgb': w_rgb, 'hvi': w_hvi}
         
         return {
             'output': output,

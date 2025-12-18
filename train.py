@@ -66,8 +66,8 @@ def train(epoch, writer=None):
     train_len = len(training_data_loader)  # DataLoader的长度
     iter = 0            # 当前epoch中已处理的batch计数器
     
-    # 梯度累积设置：batchSize=4, accum_steps=2 等效于 batchSize=8
-    accum_steps = 2  # 累积步数（每2个batch更新一次参数）
+    # 梯度累积设置：
+    accum_steps = opt.accum_steps  # 累积步数（每accum_steps个batch更新一次参数）
     
     torch.autograd.set_detect_anomaly(opt.grad_detect)
     for batch in tqdm(training_data_loader):
@@ -87,7 +87,7 @@ def train(epoch, writer=None):
        
         if opt.dual_space:
             # DualSpaceCIDNet：获取中间结果用于计算双空间损失
-            results = model.forward_with_intermediates(input_img)
+            results = model(input_img)
             output_rgb = results['output']
             rgb_out = results['rgb_out']
             hvi_out = results['hvi_out']
