@@ -77,7 +77,21 @@ def metrics(im_dir, label_dir, use_GT_mean):
     n = 0
     loss_fn = lpips.LPIPS(net='alex')
     loss_fn.cuda()
-    for item in tqdm(sorted(glob.glob(im_dir))):#glob的作用是找出所有匹配PNG的文件sorted使对列表进行排序
+    
+    # 支持多种图片格式匹配
+    if '*' in im_dir:
+        # 如果已经包含通配符，直接使用
+        im_files = sorted(glob.glob(im_dir))
+    else:
+        # 如果是目录路径，匹配多种图片格式
+        im_files = sorted(
+            glob.glob(im_dir + '*.png') + 
+            glob.glob(im_dir + '*.jpg') + 
+            glob.glob(im_dir + '*.JPG') +
+            glob.glob(im_dir + '*.jpeg')
+        )
+    
+    for item in tqdm(im_files):
         n += 1
         
         im1 = Image.open(item).convert('RGB') 
@@ -120,6 +134,13 @@ def metrics(im_dir, label_dir, use_GT_mean):
         avg_lpips += score_lpips.item()
         torch.cuda.empty_cache()
     
+    # 防止除以零错误
+    if n == 0:
+        print(f"警告: 没有找到匹配的图片文件！")
+        print(f"  im_dir: {im_dir}")
+        print(f"  label_dir: {label_dir}")
+        print(f"  请检查路径是否正确，以及文件扩展名是否匹配")
+        return 0, 0, 0
 
     avg_psnr = avg_psnr / n
     avg_ssim = avg_ssim / n

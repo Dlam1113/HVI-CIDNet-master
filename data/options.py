@@ -6,11 +6,11 @@ def option():
     parser = argparse.ArgumentParser(description='CIDNet')
 
     # 添加各种命令行参数
-    parser.add_argument('--batchSize', type=int, default=4, help='training batch size')
-    parser.add_argument('--cropSize', type=int, default=400, help='image crop size (patch size)')
-    parser.add_argument('--nEpochs', type=int, default=1500, help='number of epochs to train for end')
+    parser.add_argument('--batchSize', type=int, default=10, help='training batch size')
+    parser.add_argument('--cropSize', type=int, default=160, help='image crop size (patch size)')
+    parser.add_argument('--nEpochs', type=int, default=1000, help='number of epochs to train for end')
     parser.add_argument('--start_epoch', type=int, default=0, help='number of epochs to start, >0 is retrained a pre-trained pth')
-    parser.add_argument('--snapshots', type=int, default=50, help='Snapshots for save checkpoints pth')
+    parser.add_argument('--snapshots', type=int, default=10, help='Snapshots for save checkpoints pth')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate')
     parser.add_argument('--gpu_mode', type=bool, default=True)
     parser.add_argument('--shuffle', type=bool, default=True)
@@ -84,12 +84,12 @@ def option():
     
     
     # choose which dataset you want to train, please only set one "True"
-    parser.add_argument('--lol_v1', type=bool, default=True)
+    parser.add_argument('--lol_v1', type=bool, default=False)
     parser.add_argument('--lolv2_real', type=bool, default=False)
     parser.add_argument('--lolv2_syn', type=bool, default=False)
     parser.add_argument('--lol_blur', type=bool, default=False)
     parser.add_argument('--SID', type=bool, default=False)
-    parser.add_argument('--SICE_mix', type=bool, default=False)
+    parser.add_argument('--SICE_mix', type=bool, default=True)
     parser.add_argument('--SICE_grad', type=bool, default=False)
     parser.add_argument('--fivek', type=bool, default=False)
     return parser

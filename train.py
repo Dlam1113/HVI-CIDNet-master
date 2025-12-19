@@ -377,8 +377,7 @@ if __name__ == '__main__':
                 label_dir = opt.data_valgt_fivek
                 norm_size = False
             
-
-            im_dir = opt.val_folder + output_folder + '*.png' #模型生成的增强图像的路径模式，匹配所有png文件
+            im_dir = opt.val_folder + output_folder  # 只传目录路径
             # 每隔一定epoch进行模型评估
             eval(model, testing_data_loader, model_out_path, opt.val_folder+output_folder, 
                     norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
