@@ -104,8 +104,20 @@ def metrics(im_dir, label_dir, use_GT_mean):
             name = item.split('/')[-1]
         else:
             name = item.split('/')[-1]
-            
-        im2 = Image.open(label_dir + name).convert('RGB')
+        
+        # 尝试多种扩展名匹配GT文件（解决大小写问题）
+        gt_path = label_dir + name
+        if not os.path.exists(gt_path):
+            # 获取文件名和扩展名
+            name_without_ext = os.path.splitext(name)[0]
+            # 尝试不同的扩展名
+            for ext in ['.JPG', '.jpg', '.png', '.PNG', '.jpeg', '.JPEG']:
+                alt_path = label_dir + name_without_ext + ext
+                if os.path.exists(alt_path):
+                    gt_path = alt_path
+                    break
+        
+        im2 = Image.open(gt_path).convert('RGB')
         (h, w) = im2.size
         im1 = im1.resize((h, w))  
         im1 = np.array(im1) # 转为numpy数组 [H, W, 3]
