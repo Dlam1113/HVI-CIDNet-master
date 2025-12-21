@@ -211,27 +211,25 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         i_dec0 = self.ID_block0(i_dec1)
         
         hv_1 = self.HVD_block1(hv_1, hv_jump0)
+        hv_0 = self.HVD_block0(hv_1)  # HVI分支正常解码，不使用注意力增强
         
-        
-        # ========== Step 6: RGB-HVI跨空间交叉注意力 ==========
+        # ========== Step 6: RGB-HVI跨空间交叉注意力（仅增强RGB分支） ==========
         if self.cross_space_attn:
-            hvi_feat = hv_1  # 使用HV特征作为HVI代表
+            hvi_feat = hv_1  # 使用HV特征作为上下文信息
             
             # 下采样RGB特征以匹配HVI特征尺寸
             rgb_feat_down = nn.functional.interpolate(
                 rgb_feat, size=hvi_feat.shape[2:], mode='bilinear', align_corners=False
             )
             
-            # 双向交叉注意力
-            rgb_feat_enhanced, hvi_feat_enhanced = self.cross_attn(rgb_feat_down, hvi_feat)
+            # 单向交叉注意力：只让RGB从HVI学习，HVI不变
+            rgb_feat_enhanced, _ = self.cross_attn(rgb_feat_down, hvi_feat)
 
             # 上采样回原始尺寸
             rgb_feat_enhanced = nn.functional.interpolate(
                 rgb_feat_enhanced, size=x.shape[2:], mode='bilinear', align_corners=False)
-            hv_0 = self.HVD_block0(hvi_feat_enhanced)
         else:
             rgb_feat_enhanced = rgb_feat
-            hv_0 = self.HVD_block0(hv_1)
         
         # ========== Step 7: 生成两个分支的RGB输出 ==========
         # HVI分支输出
