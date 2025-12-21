@@ -326,14 +326,14 @@ if __name__ == '__main__':
     
     # 【TensorBoard初始化】创建TensorBoard写入器
     # 生成带时间戳的日志目录，避免不同实验的日志混在一起
-    log_dir = f'./runs/experiment_{datetime.now().strftime("%Y%m%d_%H%M%S")}'
+    log_dir = f'./runs/exp{datetime.now().strftime("%Y%m%d_%H%M%S")}'
     writer = SummaryWriter(log_dir)
     print(f"===> TensorBoard日志保存在: {log_dir}")
     print(f"===> 启动TensorBoard: tensorboard --logdir=runs")
     
     
         
-    for epoch in range(start_epoch+1, opt.nEpochs + start_epoch + 1):
+    for epoch in range(start_epoch+1, opt.nEpochs + 1):
         # 训练一个epoch，传入writer
         epoch_loss, batch_num = train(epoch, writer=writer)
         scheduler.step()  # 通过调度器更新学习率

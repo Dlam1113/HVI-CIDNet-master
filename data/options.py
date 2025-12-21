@@ -6,7 +6,7 @@ def option():
     parser = argparse.ArgumentParser(description='CIDNet')
 
     # 添加各种命令行参数
-    parser.add_argument('--batchSize', type=int, default=10, help='training batch size')
+    parser.add_argument('--batchSize', type=int, default=20, help='training batch size')
     parser.add_argument('--cropSize', type=int, default=160, help='image crop size (patch size)')
     parser.add_argument('--nEpochs', type=int, default=1000, help='number of epochs to train for end')
     parser.add_argument('--start_epoch', type=int, default=0, help='number of epochs to start, >0 is retrained a pre-trained pth')
@@ -73,7 +73,7 @@ def option():
     parser.add_argument('--grad_clip', type=bool, default=True)     # 梯度裁剪
     
     # ========== 双空间CIDNet配置（新增） ==========
-    parser.add_argument('--dual_space', type=bool, default=True, 
+    parser.add_argument('--dual_space', type=bool, default=False, 
                         help='是否使用DualSpaceCIDNet（HVI+RGB双空间融合）')
     parser.add_argument('--RGB_loss_weight', type=float, default=0.5, 
                         help='RGB分支损失权重')
