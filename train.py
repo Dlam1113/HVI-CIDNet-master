@@ -429,10 +429,12 @@ if __name__ == '__main__':
     
     #将训练过程中的所有评估指标（PSNR、SSIM、LPIPS）和训练配置保存到一个格式化的 Markdown 文件中，便于后续查看和比较实验结果。    
     now = datetime.now().strftime("%Y-%m-%d-%H%M%S")#获取当前日期并格式化时间字符串，（）里都是对应日期缩写eg：%Y是year
-    with open(f"./results/training/metrics{now}.md", "w") as f:
+    with open(f"./results/metrics/metrics{now}.md", "w") as f:
         f.write("dataset: "+ output_folder + "\n")  
+        f.write("dual_space: " + str(opt.dual_space) + "\n")
         f.write(f"lr: {opt.lr}\n")  
         f.write(f"batch size: {opt.batchSize}\n")  
+        f.write(f"accum_steps: {opt.accum_steps}\n")
         f.write(f"crop size: {opt.cropSize}\n")  
         f.write(f"HVI_weight: {opt.HVI_weight}\n")  
         f.write(f"L1_weight: {opt.L1_weight}\n")  
