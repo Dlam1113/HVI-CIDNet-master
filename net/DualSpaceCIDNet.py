@@ -17,6 +17,7 @@ from net.LCA import HV_LCA, I_LCA
 from net.RGB_Encoder import RGB_Encoder, RGB_MultiScaleEncoder
 from net.CrossSpaceAttention import CrossSpaceAttention, BidirectionalCrossAttention
 from net.LearnableFusion import LearnableFusion, AdaptiveFusion
+from net.NeuralCurve import NeuralCurveLayer
 from huggingface_hub import PyTorchModelHubMixin
 
 
@@ -36,6 +37,8 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         norm: 是否使用LayerNorm，默认False
         fusion_type: 融合方式，可选'learnable'或'adaptive'
         cross_space_attn: 是否使用跨空间注意力，默认True
+        use_curve: 是否使用神经曲线层对I通道进行全局调整，默认False（消融实验用）
+        curve_M: 曲线控制点数量，默认11
     """
     
     def __init__(self, 
@@ -43,11 +46,14 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
                  heads=[1, 2, 4, 8],
                  norm=False,
                  fusion_type='learnable',
-                 cross_space_attn=True
+                 cross_space_attn=True,
+                 use_curve=False,
+                 curve_M=11
         ):
         super(DualSpaceCIDNet, self).__init__()
         
         self.cross_space_attn = cross_space_attn
+        self.use_curve = use_curve
         [ch1, ch2, ch3, ch4] = channels
         [head1, head2, head3, head4] = heads
         
@@ -128,7 +134,12 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         elif fusion_type == 'adaptive':
             self.fusion = AdaptiveFusion(in_channels=3, mid_channels=32)
         else:
-            self.fusion = LearnableFusion(in_channels=3, mid_channels=32, use_input=True)
+            raise ValueError("Invalid fusion_type. Must be 'learnable' or 'adaptive'.")
+        
+        # ========== 神经曲线层（消融实验） ==========
+        if self.use_curve:
+            # 对 I 通道进行全局曲线调整
+            self.i_curve = NeuralCurveLayer(in_channels=ch1, M=curve_M, num_curves=1)
     
     def forward(self, x):
         """
@@ -209,6 +220,13 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         
         i_dec1 = self.ID_block1(i_dec1, i_jump0)
         i_dec0 = self.ID_block0(i_dec1)
+        
+        # ========== Step 5.1: 神经曲线层调整 I 通道（消融实验） ==========
+        if self.use_curve:
+            # 从 I 解码特征中预测曲线并应用到 I 通道
+            # i_dec0 是 I 通道输出 [B, 1, H, W]，需要先归一化到 [0, 1]
+            i_normalized = torch.clamp(i_dec0, 0, 1)
+            i_dec0 = self.i_curve(i_dec1, i_normalized)
         
         hv_1 = self.HVD_block1(hv_1, hv_jump0)
         hv_0 = self.HVD_block0(hv_1)  # HVI分支正常解码，不使用注意力增强

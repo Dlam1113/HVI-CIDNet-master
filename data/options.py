@@ -82,6 +82,12 @@ def option():
     parser.add_argument('--fusion_type', type=str, default='learnable', 
                         help='融合类型：learnable/adaptive')
     
+    # ========== 神经曲线层消融实验 ==========
+    parser.add_argument('--use_curve', type=bool, default=False,
+                        help='是否使用神经曲线层对I通道进行全局调整（消融实验）')
+    parser.add_argument('--curve_M', type=int, default=11,
+                        help='曲线控制点数量')
+    
     
     # choose which dataset you want to train, please only set one "True"
     parser.add_argument('--lol_v1', type=bool, default=False)

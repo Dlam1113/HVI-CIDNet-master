@@ -236,11 +236,15 @@ def build_model():
     # 根据配置选择模型
     if opt.dual_space:
         print('===> 使用 DualSpaceCIDNet (HVI+RGB双空间融合)')
+        if opt.use_curve:
+            print('===> 启用神经曲线层消融实验 (I通道全局调整)')
         model = DualSpaceCIDNet(
             channels=[36, 36, 72, 144],
             heads=[1, 2, 4, 8],
             fusion_type=opt.fusion_type,
-            cross_space_attn=opt.cross_space_attn
+            cross_space_attn=opt.cross_space_attn,
+            use_curve=opt.use_curve,
+            curve_M=opt.curve_M
         ).cuda()
     else:
         print('===> 使用原始 CIDNet')
