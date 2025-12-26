@@ -104,14 +104,21 @@ class NeuralCurveLayer(nn.Module):
         
         # 曲线预测网络：从特征中预测控制点
         self.curve_predictor = nn.Sequential(
-            # 全局平均池化
+            # 全局平均池化：把 [B,C,H,W] 变成 [B,C,1,1]
             nn.AdaptiveAvgPool2d(1),
+            
+            # 展平：[B,C,1,1] → [B,C]
             nn.Flatten(),
-            # 全连接层预测控制点
+            
+            # 第一层全连接：C → 64
             nn.Linear(in_channels, 64),
             nn.ReLU(inplace=True),
+            
+            # 第二层全连接：64 → M（控制点数）
             nn.Linear(64, num_curves * M),
-            nn.Sigmoid()  # 确保控制点在 [0, 1] 范围内
+            
+            # Sigmoid：确保输出在 [0,1] 范围
+            nn.Sigmoid()
         )
         
         # 初始化为恒等映射（对角线曲线）
@@ -121,6 +128,7 @@ class NeuralCurveLayer(nn.Module):
         """
         初始化曲线为恒等映射
         使得初始时 output = input（对角线曲线）
+        让神经曲线层在训练开始时不改变图像。
         """
         # 最后一个线性层的权重初始化为 0
         # 偏置初始化为等间距的值 [0, 1/M, 2/M, ..., 1]
