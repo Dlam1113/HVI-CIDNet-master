@@ -229,7 +229,7 @@ def load_datasets():
         if opt.LoLI_Street:
             train_set = get_LoLI_Street_training_set(opt.data_LoLI_Street, size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
-            test_set = get_eval_set(opt.data_val_LoLI_Street)
+            test_set = get_SICE_eval_set(opt.data_val_LoLI_Street)  # 使用 SICE eval（返回4个值）
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
     else:
         raise ValueError("should choose a dataset")
