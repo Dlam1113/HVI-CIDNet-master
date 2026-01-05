@@ -177,7 +177,7 @@ def checkpoint(epoch):
     
 def load_datasets():
     print('===> Loading datasets')
-    if opt.lol_v1 or opt.lol_blur or opt.lolv2_real or opt.lolv2_syn or opt.SID or opt.SICE_mix or opt.SICE_grad or opt.fivek:
+    if opt.lol_v1 or opt.lol_blur or opt.lolv2_real or opt.lolv2_syn or opt.SID or opt.SICE_mix or opt.SICE_grad or opt.fivek or opt.LoLI_Street:
         if opt.lol_v1:
             train_set = get_lol_training_set(opt.data_train_lol_v1,size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
@@ -224,6 +224,12 @@ def load_datasets():
             train_set = get_fivek_training_set(opt.data_train_fivek,size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
             test_set = get_fivek_eval_set(opt.data_val_fivek)
+            testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
+        
+        if opt.LoLI_Street:
+            train_set = get_LoLI_Street_training_set(opt.data_LoLI_Street, size=opt.cropSize)
+            training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
+            test_set = get_eval_set(opt.data_val_LoLI_Street)
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
     else:
         raise ValueError("should choose a dataset")
@@ -379,6 +385,10 @@ if __name__ == '__main__':
             if opt.fivek:
                 output_folder = 'fivek/'
                 label_dir = opt.data_valgt_fivek
+                norm_size = False
+            if opt.LoLI_Street:
+                output_folder = 'LoLI_Street/'
+                label_dir = opt.data_valgt_LoLI_Street
                 norm_size = False
             
             im_dir = opt.val_folder + output_folder  # 只传目录路径

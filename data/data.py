@@ -3,6 +3,8 @@ from data.LOLdataset import *
 from data.eval_sets import *
 from data.SICE_blur_SID import *
 from data.fivek import *
+from data.new_datasets import *
+
 
 def transform1(size=256):
     if size <= 0:  # 不裁剪
@@ -47,6 +49,11 @@ def get_SID_training_set(data_dir,size):
 
 def get_SICE_training_set(data_dir,size):
     return SICEDatasetFromFolder(data_dir, transform=transform1(size))
+
+
+def get_LoLI_Street_training_set(data_dir,size):
+    return LoLI_StreetDatasetFromFolder(data_dir,transform=transform1(size))
+
 
 # 通用评估数据集
 def get_SICE_eval_set(data_dir):
