@@ -147,8 +147,8 @@ class NeuralCurveLayer(nn.Module):
         前向传播
         
         参数:
-            feat: CNN 特征 [B, in_channels, H, W]
-            img_channel: 图像通道 [B, num_curves, H, W]，范围 [0, 1]
+            feat:idec1 CNN 特征 [B, in_channels, H, W]
+            img_channel:idec0 图像通道 [B, num_curves, H, W]，范围 [0, 1]
             return_curve: 是否返回曲线控制点
             
         返回:
