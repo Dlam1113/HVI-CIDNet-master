@@ -112,7 +112,7 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         self.I_LCA6 = I_LCA(ch2, head2)
         
         # ========== RGB分支（新增） ==========
-        self.rgb_encoder = RGB_Encoder(in_channels=3, mid_channels=64, out_channels=ch1)
+        self.rgb_encoder = RGB_Encoder(in_channels=3, mid_channels=64, out_channels=3)
         
         # RGB输出头：将特征转换回3通道RGB
         self.rgb_head = nn.Sequential(
@@ -255,7 +255,8 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         hvi_rgb = self.trans.PHVIT(output_hvi)
         
         # RGB分支输出
-        rgb_rgb = self.rgb_head(rgb_feat_enhanced)
+        # rgb_rgb = self.rgb_head(rgb_feat_enhanced)
+        rgb_rgb = rgb_feat_enhanced
         
         # ========== Step 8: 可学习权重融合 ==========
         output, w_rgb, w_hvi = self.fusion(rgb_rgb, hvi_rgb, x)

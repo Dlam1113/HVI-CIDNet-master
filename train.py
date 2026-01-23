@@ -433,10 +433,12 @@ if __name__ == '__main__':
         best_ssim = max(ssim)
         best_lpips = min(lpips)
         best_psnr_epoch = (psnr.index(best_psnr) + 1) * opt.snapshots
+        best_ssim_epoch = (ssim.index(best_ssim) + 1) * opt.snapshots
+        best_lpips_epoch = (lpips.index(best_lpips) + 1) * opt.snapshots
         
         writer.add_text('Final_Results/Best_PSNR', f'{best_psnr:.4f} at Epoch {best_psnr_epoch}')
-        writer.add_text('Final_Results/Best_SSIM', f'{best_ssim:.4f}')
-        writer.add_text('Final_Results/Best_LPIPS', f'{best_lpips:.4f}')
+        writer.add_text('Final_Results/Best_SSIM', f'{best_ssim:.4f} at Epoch {best_ssim_epoch}')
+        writer.add_text('Final_Results/Best_LPIPS', f'{best_lpips:.4f} at Epoch {best_lpips_epoch}')
     
     writer.close()
     print(f"===> TensorBoard日志已保存到: {log_dir}")
@@ -457,10 +459,12 @@ if __name__ == '__main__':
         f.write(f"P_weight: {opt.P_weight}\n")
         f.write(f"TensorBoard日志: {log_dir}\n\n")
         best_psnr_idx = psnr.index(max(psnr))
+        best_ssim_idx = ssim.index(max(ssim))
+        best_lpips_idx = lpips.index(min(lpips))
         f.write("## 最佳结果\n\n")
         f.write(f"- **最佳PSNR**: {max(psnr):.4f} (Epoch {(best_psnr_idx+1)*opt.snapshots})\n")
-        f.write(f"- **最佳SSIM**: {max(ssim):.4f}\n")
-        f.write(f"- **最低LPIPS**: {min(lpips):.4f}\n\n")  
+        f.write(f"- **最佳SSIM**: {max(ssim):.4f} (Epoch {(best_ssim_idx+1)*opt.snapshots})\n")
+        f.write(f"- **最低LPIPS**: {min(lpips):.4f} (Epoch {(best_lpips_idx+1)*opt.snapshots})\n\n")  
         f.write("| Epochs | PSNR | SSIM | LPIPS |\n")  
         f.write("|----------------------|----------------------|----------------------|----------------------|\n")  
         for i in range(len(psnr)):

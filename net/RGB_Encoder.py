@@ -30,7 +30,7 @@ class RGB_Encoder(nn.Module):
         out_channels: 输出通道数，默认36（与CIDNet的ch1对齐）
     """
     
-    def __init__(self, in_channels=3, mid_channels=64, out_channels=36):
+    def __init__(self, in_channels=3, mid_channels=64, out_channels=3):
         super(RGB_Encoder, self).__init__()
         
         self.out_channels = out_channels
