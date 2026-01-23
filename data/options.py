@@ -6,11 +6,11 @@ def option():
     parser = argparse.ArgumentParser(description='CIDNet')
 
     # 添加各种命令行参数
-    parser.add_argument('--batchSize', type=int, default=20, help='training batch size')
-    parser.add_argument('--cropSize', type=int, default=160, help='image crop size (patch size)')
+    parser.add_argument('--batchSize', type=int, default=4, help='training batch size')
+    parser.add_argument('--cropSize', type=int, default=256, help='image crop size (patch size)')
     parser.add_argument('--nEpochs', type=int, default=1000, help='number of epochs to train for end')
     parser.add_argument('--start_epoch', type=int, default=0, help='number of epochs to start, >0 is retrained a pre-trained pth')
-    parser.add_argument('--snapshots', type=int, default=10, help='Snapshots for save checkpoints pth')
+    parser.add_argument('--snapshots', type=int, default=5, help='Snapshots for save checkpoints pth')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate')
     parser.add_argument('--gpu_mode', type=bool, default=True)
     parser.add_argument('--shuffle', type=bool, default=True)
@@ -76,11 +76,11 @@ def option():
     parser.add_argument('--grad_clip', type=bool, default=True)     # 梯度裁剪
     
     # ========== 双空间CIDNet配置（新增） ==========
-    parser.add_argument('--dual_space', type=bool, default=False, 
+    parser.add_argument('--dual_space', type=bool, default=True, 
                         help='是否使用DualSpaceCIDNet（HVI+RGB双空间融合）')
     parser.add_argument('--RGB_loss_weight', type=float, default=0.5, 
                         help='RGB分支损失权重')
-    parser.add_argument('--cross_space_attn', type=bool, default=True, 
+    parser.add_argument('--cross_space_attn', type=bool, default=False, 
                         help='是否使用跨空间交叉注意力')
     parser.add_argument('--fusion_type', type=str, default='learnable', 
                         help='融合类型：learnable/adaptive')
