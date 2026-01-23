@@ -112,16 +112,8 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         self.I_LCA6 = I_LCA(ch2, head2)
         
         # ========== RGB分支（新增） ==========
+        # RGB_Encoder已直接输出3通道，无需额外的rgb_head
         self.rgb_encoder = RGB_Encoder(in_channels=3, mid_channels=64, out_channels=3)
-        
-        # RGB输出头：将特征转换回3通道RGB
-        self.rgb_head = nn.Sequential(
-            nn.Conv2d(ch1, 64, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.InstanceNorm2d(64),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(64, 3, kernel_size=1, stride=1, padding=0, bias=False),
-            nn.Sigmoid()
-        )
         
         # ========== RGB-HVI跨空间交叉注意力（核心创新） ==========
         if self.cross_space_attn:
@@ -254,9 +246,8 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         output_hvi = torch.cat([hv_0, i_dec0], dim=1) + hvi
         hvi_rgb = self.trans.PHVIT(output_hvi)
         
-        # RGB分支输出
-        # rgb_rgb = self.rgb_head(rgb_feat_enhanced)
-        rgb_rgb = rgb_feat_enhanced
+        # RGB分支输出（RGB_Encoder已输出3通道，使用Sigmoid确保输出范围[0,1]）
+        rgb_rgb = torch.sigmoid(rgb_feat_enhanced)
         
         # ========== Step 8: 可学习权重融合 ==========
         output, w_rgb, w_hvi = self.fusion(rgb_rgb, hvi_rgb, x)
