@@ -448,6 +448,11 @@ if __name__ == '__main__':
     with open(f"./results/metrics/metrics{now}.md", "w") as f:
         f.write("dataset: "+ output_folder + "\n")  
         f.write("dual_space: " + str(opt.dual_space) + "\n")
+        f.write("RGB_loss_weight: " + str(opt.RGB_loss_weight) + "\n")
+        f.write("cross_space_attn: " + str(opt.cross_space_attn) + "\n")
+        f.write("fusion_type: " + str(opt.fusion_type) + "\n")
+        f.write("use_curve: " + str(opt.use_curve) + "\n")
+        f.write("curve_M: " + str(opt.curve_M) + "\n")
         f.write(f"lr: {opt.lr}\n")  
         f.write(f"batch size: {opt.batchSize}\n")  
         f.write(f"accum_steps: {opt.accum_steps}\n")
