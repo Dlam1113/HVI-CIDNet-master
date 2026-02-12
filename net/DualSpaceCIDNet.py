@@ -1,12 +1,15 @@
 """
-双空间CIDNet主网络
-DualSpaceCIDNet - HVI + RGB 双空间特征级融合网络
+双空间CIDNet主网络（串联版本 v2）
+DualSpaceCIDNet - RGB初步增强 → HVI深度精化 串联架构
 
-核心创新：
-1. 保留原CIDNet的HVI双流(HV+I)结构
-2. 新增RGB处理分支
-3. 在多尺度特征层进行跨空间交叉注意力
-4. 使用可学习权重进行输出融合
+核心设计（借鉴UIEC²-Net的串联思路）：
+1. RGB Pixel-Level Block 先做初步增强（去噪、色偏校正）
+2. 将增强后的RGB转到HVI空间
+3. CIDNet双流结构在HVI空间进行深度精化
+4. 输出与原CIDNet兼容（直接返回tensor）
+
+可选消融实验：
+- use_curve: 在I通道解码后添加神经曲线层进行全局调整
 """
 
 import torch
@@ -14,29 +17,32 @@ import torch.nn as nn
 from net.HVI_transform import RGB_HVI
 from net.transformer_utils import NormDownsample, NormUpsample
 from net.LCA import HV_LCA, I_LCA
-from net.RGB_Encoder import RGB_Encoder, RGB_MultiScaleEncoder
-from net.CrossSpaceAttention import CrossSpaceAttention, BidirectionalCrossAttention
-from net.LearnableFusion import LearnableFusion, AdaptiveFusion
+from net.RGB_Encoder import RGB_Encoder
 from net.NeuralCurve import NeuralCurveLayer
 from huggingface_hub import PyTorchModelHubMixin
+
+# ========== 以下模块在并联方案(方案A)中使用，当前串联方案暂不使用 ==========
+# from net.RGB_Encoder import RGB_MultiScaleEncoder
+# from net.CrossSpaceAttention import CrossSpaceAttention, BidirectionalCrossAttention
+# from net.LearnableFusion import LearnableFusion, AdaptiveFusion
 
 
 class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
     """
-    双空间CIDNet：HVI + RGB 特征级交叉注意力融合
+    串联双空间CIDNet（v2版本）
+
+    架构：输入 → RGB Block(+残差) → 增强RGB → 转HVI → CIDNet双流处理 → 输出RGB
     
-    架构设计：
-    - HVI分支：保留原CIDNet的双流结构（HV流 + I流）
-    - RGB分支：新增7层CNN编码器
-    - 跨空间交互：在解码阶段进行RGB-HVI交叉注意力
-    - 输出融合：使用可学习权重融合两个分支的输出
+    相比原CIDNet：
+    - 在HVI处理之前，先用RGB Pixel-Level Block做初步增强
+    - RGB Block使用残差连接，学习增量变化
+    - 其余结构与原CIDNet完全一致
+    - 返回值与原CIDNet兼容（直接返回tensor）
     
     参数:
         channels: 各层通道数列表，默认[36, 36, 72, 144]
         heads: 各层注意力头数列表，默认[1, 2, 4, 8]
         norm: 是否使用LayerNorm，默认False
-        fusion_type: 融合方式，可选'learnable'或'adaptive'
-        cross_space_attn: 是否使用跨空间注意力，默认True
         use_curve: 是否使用神经曲线层对I通道进行全局调整，默认False（消融实验用）
         curve_M: 曲线控制点数量，默认11
     """
@@ -45,20 +51,25 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
                  channels=[36, 36, 72, 144],
                  heads=[1, 2, 4, 8],
                  norm=False,
-                 fusion_type='learnable',
-                 cross_space_attn=True,
                  use_curve=False,
                  curve_M=11
+                 # ========== 以下参数在并联方案(方案A)中使用，当前串联方案暂不使用 ==========
+                 # fusion_type='learnable',
+                 # cross_space_attn=True,
         ):
         super(DualSpaceCIDNet, self).__init__()
         
-        self.cross_space_attn = cross_space_attn
         self.use_curve = use_curve
         [ch1, ch2, ch3, ch4] = channels
         [head1, head2, head3, head4] = heads
         
         # ========== HVI空间转换 ==========
         self.trans = RGB_HVI()
+        
+        # ========== RGB Pixel-Level Block（串联第一阶段） ==========
+        # 借鉴UIEC²-Net的RGB像素级处理块
+        # 输出3通道，通过残差连接实现初步增强
+        self.rgb_encoder = RGB_Encoder(in_channels=3, mid_channels=64, out_channels=3)
         
         # ========== HV流编码器（原CIDNet结构） ==========
         self.HVE_block0 = nn.Sequential(
@@ -111,53 +122,44 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         self.I_LCA5 = I_LCA(ch3, head3)
         self.I_LCA6 = I_LCA(ch2, head2)
         
-        # ========== RGB分支（新增） ==========
-        # RGB_Encoder已直接输出3通道，无需额外的rgb_head
-        self.rgb_encoder = RGB_Encoder(in_channels=3, mid_channels=64, out_channels=3)
-        
-        # ========== RGB-HVI跨空间交叉注意力（核心创新） ==========
-        if self.cross_space_attn:
-            # RGB特征与HVI特征的双向交叉注意力
-            self.cross_attn = BidirectionalCrossAttention(ch1, num_heads=head1 if head1 > 0 else 1)
-        
-        # ========== 可学习权重融合（新增） ==========
-        if fusion_type == 'learnable':
-            self.fusion = LearnableFusion(in_channels=3, mid_channels=32, use_input=True)
-        elif fusion_type == 'adaptive':
-            self.fusion = AdaptiveFusion(in_channels=3, mid_channels=32)
-        else:
-            raise ValueError("Invalid fusion_type. Must be 'learnable' or 'adaptive'.")
-        
-        # ========== 神经曲线层（消融实验） ==========
+        # ========== 神经曲线层（I分支消融实验） ==========
         if self.use_curve:
             # 对 I 通道进行全局曲线调整
             self.i_curve = NeuralCurveLayer(in_channels=ch1, M=curve_M, num_curves=1)
+        
+        # ========== 以下模块在并联方案(方案A)中使用，当前串联方案暂不使用 ==========
+        # if cross_space_attn:
+        #     self.cross_attn = BidirectionalCrossAttention(ch1, num_heads=head1 if head1 > 0 else 1)
+        # if fusion_type == 'learnable':
+        #     self.fusion = LearnableFusion(in_channels=3, mid_channels=32, use_input=True)
+        # elif fusion_type == 'adaptive':
+        #     self.fusion = AdaptiveFusion(in_channels=3, mid_channels=32)
     
     def forward(self, x):
         """
-        前向传播
+        串联前向传播
+        
+        流程：输入 → RGB Block(+残差) → 增强RGB → 转HVI → CIDNet双流 → 输出RGB
         
         参数:
-            x: 输入RGB图像 [B, 3, H, W]
+            x: 输入RGB图像 [B, 3, H, W]，范围[0, 1]
             
         返回:
-            dict: {
-                'output': 最终输出,
-                'rgb_out': RGB分支输出,
-                'hvi_out': HVI分支输出,
-                'fusion_weights': 融合权重（如果使用LearnableFusion）
-        }
+            output_rgb: 最终增强RGB图像 [B, 3, H, W]（与原CIDNet兼容）
         """
         dtypes = x.dtype
         
-        # ========== Step 1: HVI空间转换 ==========
-        hvi = self.trans.HVIT(x)
+        # ========== 第一阶段：RGB Pixel-Level Block 初步增强 ==========
+        # RGB Block输出 + 输入残差连接，学习增量变化
+        rgb_residual = self.rgb_encoder(x)               # [B, 3, H, W]
+        rgb_enhanced = torch.clamp(rgb_residual + x, 0, 1)  # 残差连接 + 截断到[0,1]
+        
+        # ========== 第二阶段：转到HVI空间 ==========
+        # 对增强后的RGB（而非原始输入）进行HVI转换
+        hvi = self.trans.HVIT(rgb_enhanced)
         i = hvi[:, 2, :, :].unsqueeze(1).to(dtypes)
         
-        # ========== Step 2: RGB分支编码 ==========
-        rgb_feat = self.rgb_encoder(x)  # [B, ch1, H, W]
-        
-        # ========== Step 3: HVI分支编码 ==========
+        # ========== 第三阶段：CIDNet HVI双流处理（与原CIDNet完全一致） ==========
         # I流编码
         i_enc0 = self.IE_block0(i)
         i_enc1 = self.IE_block1(i_enc0)
@@ -170,7 +172,7 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         i_jump0 = i_enc0
         hv_jump0 = hv_0
         
-        # ========== Step 4: 第一次HV-I交叉注意力 ==========
+        # 第一次HV-I交叉注意力
         i_enc2 = self.I_LCA1(i_enc1, hv_1)
         hv_2 = self.HV_LCA1(hv_1, i_enc1)
         v_jump1 = i_enc2
@@ -186,6 +188,7 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         v_jump2 = i_enc3
         hv_jump2 = hv_3
         
+        # 继续编码（沿用原CIDNet设计）
         i_enc3 = self.IE_block3(i_enc2)
         hv_3 = self.HVE_block3(hv_2)
         
@@ -197,7 +200,7 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         i_dec4 = self.I_LCA4(i_enc4, hv_4)
         hv_4 = self.HV_LCA4(hv_4, i_enc4)
         
-        # ========== Step 5: HVI分支解码 ==========
+        # ========== HVI分支解码 ==========
         hv_3 = self.HVD_block3(hv_4, hv_jump2)
         i_dec3 = self.ID_block3(i_dec4, v_jump2)
         
@@ -213,52 +216,20 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         i_dec1 = self.ID_block1(i_dec1, i_jump0)
         i_dec0 = self.ID_block0(i_dec1)
         
-        # ========== Step 5.1: 神经曲线层调整 I 通道（消融实验） ==========
+        # ========== 神经曲线层调整 I 通道（消融实验可选） ==========
         if self.use_curve:
-            # 从 I 解码特征中预测曲线并应用到 I 通道
-            # i_dec0 是 I 通道输出 [B, 1, H, W]，需要先归一化到 [0, 1]
             i_normalized = torch.clamp(i_dec0, 0, 1)
             i_dec0 = self.i_curve(i_dec1, i_normalized)
         
         hv_1 = self.HVD_block1(hv_1, hv_jump0)
-        hv_0 = self.HVD_block0(hv_1)  # HVI分支正常解码，不使用注意力增强
+        hv_0 = self.HVD_block0(hv_1)
         
-        # ========== Step 6: RGB-HVI跨空间交叉注意力（仅增强RGB分支） ==========
-        if self.cross_space_attn:
-            hvi_feat = hv_1  # 使用HV特征作为上下文信息
-            
-            # 下采样RGB特征以匹配HVI特征尺寸
-            rgb_feat_down = nn.functional.interpolate(
-                rgb_feat, size=hvi_feat.shape[2:], mode='bilinear', align_corners=False
-            )
-            
-            # 单向交叉注意力：只让RGB从HVI学习，HVI不变
-            rgb_feat_enhanced, _ = self.cross_attn(rgb_feat_down, hvi_feat)
-
-            # 上采样回原始尺寸
-            rgb_feat_enhanced = nn.functional.interpolate(
-                rgb_feat_enhanced, size=x.shape[2:], mode='bilinear', align_corners=False)
-        else:
-            rgb_feat_enhanced = rgb_feat
-        
-        # ========== Step 7: 生成两个分支的RGB输出 ==========
-        # HVI分支输出
+        # ========== 第四阶段：HVI → RGB 输出 ==========
+        # 残差连接：解码输出 + HVI输入（与原CIDNet一致）
         output_hvi = torch.cat([hv_0, i_dec0], dim=1) + hvi
-        hvi_rgb = self.trans.PHVIT(output_hvi)
+        output_rgb = self.trans.PHVIT(output_hvi)
         
-        # RGB分支输出（RGB_Encoder已输出3通道，使用Sigmoid确保输出范围[0,1]）
-        rgb_rgb = torch.sigmoid(rgb_feat_enhanced)
-        
-        # ========== Step 8: 可学习权重融合 ==========
-        output, w_rgb, w_hvi = self.fusion(rgb_rgb, hvi_rgb, x)
-        fusion_weights = {'rgb': w_rgb, 'hvi': w_hvi}
-        
-        return {
-            'output': output,
-            'rgb_out': rgb_rgb,
-            'hvi_out': hvi_rgb,
-            'fusion_weights': fusion_weights
-        }
+        return output_rgb  # 与原CIDNet返回格式完全兼容
     
     def HVIT(self, x):
         """获取HVI变换结果（兼容原CIDNet接口）"""
@@ -269,7 +240,7 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
 # ==========  测试代码  ==========
 if __name__ == '__main__':
     print("=" * 60)
-    print("DualSpaceCIDNet 主网络单元测试")
+    print("DualSpaceCIDNet（串联版本v2）单元测试")
     print("=" * 60)
     
     # 测试配置
@@ -278,61 +249,48 @@ if __name__ == '__main__':
     
     # 模拟输入
     x = torch.randn(batch_size, 3, height, width)
+    x = torch.clamp(x, 0, 1)  # 确保输入在[0,1]范围
     
     print(f"\n测试配置:")
     print(f"  批次大小: {batch_size}")
     print(f"  图像尺寸: {height}x{width}")
     print("-" * 40)
     
-    # 测试1: 基础前向传播
-    print("\n[测试1] DualSpaceCIDNet (基础前向传播)")
+    # 测试1: 基础串联前向传播
+    print("\n[测试1] DualSpaceCIDNet 串联前向传播")
     model = DualSpaceCIDNet(
         channels=[36, 36, 72, 144],
         heads=[1, 2, 4, 8],
-        fusion_type='learnable',
-        cross_space_attn=True
     )
     out = model(x)
     print(f"  输入形状: {x.shape}")
     print(f"  输出形状: {out.shape}")
+    print(f"  输出类型: {type(out)}")  # 应该是tensor，不是dict
     print(f"  输出范围: [{out.min().item():.4f}, {out.max().item():.4f}]")
     print(f"  总参数量: {sum(p.numel() for p in model.parameters()):,}")
     assert out.shape == x.shape, "输出形状错误！"
+    assert isinstance(out, torch.Tensor), "输出类型应为tensor！"
     print("  [OK] 测试通过")
     
-    # 测试2: 带中间结果的前向传播
-    print("\n[测试2] forward_with_intermediates")
-    results = model.forward_with_intermediates(x)
-    print(f"  最终输出形状: {results['output'].shape}")
-    print(f"  RGB分支输出形状: {results['rgb_out'].shape}")
-    print(f"  HVI分支输出形状: {results['hvi_out'].shape}")
-    if results['fusion_weights'] is not None:
-        print(f"  RGB权重形状: {results['fusion_weights']['rgb'].shape}")
-        print(f"  HVI权重形状: {results['fusion_weights']['hvi'].shape}")
-    print("  [OK] 测试通过")
-    
-    # 测试3: 无跨空间注意力
-    print("\n[测试3] DualSpaceCIDNet (无跨空间注意力)")
-    model_no_cross = DualSpaceCIDNet(
+    # 测试2: 带神经曲线层
+    print("\n[测试2] DualSpaceCIDNet + 神经曲线层")
+    model_curve = DualSpaceCIDNet(
         channels=[36, 36, 72, 144],
         heads=[1, 2, 4, 8],
-        cross_space_attn=False
+        use_curve=True,
+        curve_M=11,
     )
-    out_no_cross = model_no_cross(x)
-    print(f"  输出形状: {out_no_cross.shape}")
-    print(f"  参数量: {sum(p.numel() for p in model_no_cross.parameters()):,}")
+    out_curve = model_curve(x)
+    print(f"  输出形状: {out_curve.shape}")
+    print(f"  总参数量: {sum(p.numel() for p in model_curve.parameters()):,}")
+    assert out_curve.shape == x.shape, "输出形状错误！"
     print("  [OK] 测试通过")
     
-    # 测试4: 使用AdaptiveFusion
-    print("\n[测试4] DualSpaceCIDNet (AdaptiveFusion)")
-    model_adaptive = DualSpaceCIDNet(
-        channels=[36, 36, 72, 144],
-        heads=[1, 2, 4, 8],
-        fusion_type='adaptive'
-    )
-    out_adaptive = model_adaptive(x)
-    print(f"  输出形状: {out_adaptive.shape}")
-    print(f"  参数量: {sum(p.numel() for p in model_adaptive.parameters()):,}")
+    # 测试3: HVIT兼容性
+    print("\n[测试3] HVIT接口兼容性")
+    hvi = model.HVIT(out)
+    print(f"  HVI输出形状: {hvi.shape}")
+    assert hvi.shape == (batch_size, 3, height, width), "HVIT输出形状错误！"
     print("  [OK] 测试通过")
     
     # 参数量对比
@@ -343,30 +301,33 @@ if __name__ == '__main__':
         from net.CIDNet import CIDNet
         original_model = CIDNet(channels=[36, 36, 72, 144], heads=[1, 2, 4, 8])
         original_params = sum(p.numel() for p in original_model.parameters())
-        print(f"  原CIDNet:        {original_params:>10,}")
+        print(f"  原CIDNet:           {original_params:>10,}")
     except:
         original_params = 0
-        print("  原CIDNet:        (无法加载)")
+        print("  原CIDNet:           (无法加载)")
     
     dual_params = sum(p.numel() for p in model.parameters())
-    print(f"  DualSpaceCIDNet: {dual_params:>10,}")
+    dual_curve_params = sum(p.numel() for p in model_curve.parameters())
+    print(f"  串联CIDNet:         {dual_params:>10,}")
+    print(f"  串联CIDNet+曲线层:  {dual_curve_params:>10,}")
     
     if original_params > 0:
         increase = (dual_params - original_params) / original_params * 100
-        print(f"  参数增加:        {increase:>9.1f}%")
+        print(f"  参数增加:           {increase:>9.1f}%")
     
     # GPU测试
     if torch.cuda.is_available():
-        print("\n[测试5] GPU兼容性测试")
+        print("\n[测试4] GPU兼容性测试")
         x_cuda = x.cuda()
         model_cuda = DualSpaceCIDNet().cuda()
         out_cuda = model_cuda(x_cuda)
         print(f"  GPU设备: {out_cuda.device}")
         print(f"  输出形状: {out_cuda.shape}")
+        assert isinstance(out_cuda, torch.Tensor), "GPU输出类型应为tensor！"
         print("  [OK] GPU测试通过")
     else:
-        print("\n[测试5] GPU不可用，跳过GPU测试")
+        print("\n[测试4] GPU不可用，跳过GPU测试")
     
     print("\n" + "=" * 60)
-    print("所有测试通过！DualSpaceCIDNet主网络可正常使用。")
+    print("所有测试通过！串联DualSpaceCIDNet可正常使用。")
     print("=" * 60)

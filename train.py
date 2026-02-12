@@ -85,39 +85,15 @@ def train(epoch, writer=None):
         gt_rgb = im2
         
        
-        if opt.dual_space:
-            # DualSpaceCIDNet：获取中间结果用于计算双空间损失
-            results = model(input_img)
-            output_rgb = results['output']
-            rgb_out = results['rgb_out']
-            hvi_out = results['hvi_out']
-                
-            # 计算双空间损失
-            output_hvi = model.HVIT(output_rgb)
-            gt_hvi = model.HVIT(gt_rgb)
-                
-            # 最终输出损失
-            loss_output = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
-                
-            # RGB分支损失（新增）
-            loss_rgb_branch = (L1_loss(rgb_out, gt_rgb) + D_loss(rgb_out, gt_rgb) * 0.5) * opt.RGB_loss_weight
-                
-            # HVI分支损失
-            loss_hvi_branch = (L1_loss(hvi_out, gt_rgb) + D_loss(hvi_out, gt_rgb) + E_loss(hvi_out, gt_rgb)) * opt.HVI_weight
-                
-            # HVI空间损失
-            loss_hvi_space = (L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi)) * opt.HVI_weight
-                
-            # 总损失
-            loss = loss_output + loss_rgb_branch + loss_hvi_branch + loss_hvi_space
-        else:
-            # 原CIDNet训练逻辑
-            output_rgb = model(input_img)
-            output_hvi = model.HVIT(output_rgb)
-            gt_hvi = model.HVIT(gt_rgb)
-            loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
-            loss_rgb = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
-            loss = loss_rgb + opt.HVI_weight * loss_hvi
+        # 串联DualSpaceCIDNet与原CIDNet使用完全一致的损失结构
+        # DualSpaceCIDNet: 输入 → RGB Block → 增强RGB → HVI空间CIDNet处理 → 输出
+        # 原CIDNet:        输入 → HVI空间CIDNet处理 → 输出
+        output_rgb = model(input_img)  # 两种模型都直接返回tensor
+        output_hvi = model.HVIT(output_rgb)
+        gt_hvi = model.HVIT(gt_rgb)
+        loss_hvi = L1_loss(output_hvi, gt_hvi) + D_loss(output_hvi, gt_hvi) + E_loss(output_hvi, gt_hvi) + opt.P_weight * P_loss(output_hvi, gt_hvi)[0]
+        loss_rgb = L1_loss(output_rgb, gt_rgb) + D_loss(output_rgb, gt_rgb) + E_loss(output_rgb, gt_rgb) + opt.P_weight * P_loss(output_rgb, gt_rgb)[0]
+        loss = loss_rgb + opt.HVI_weight * loss_hvi
         
         iter += 1
         
@@ -241,14 +217,12 @@ def build_model():
     
     # 根据配置选择模型
     if opt.dual_space:
-        print('===> 使用 DualSpaceCIDNet (HVI+RGB双空间融合)')
+        print('===> 使用 DualSpaceCIDNet (串联版本: RGB Block → HVI CIDNet)')
         if opt.use_curve:
             print('===> 启用神经曲线层消融实验 (I通道全局调整)')
         model = DualSpaceCIDNet(
             channels=[36, 36, 72, 144],
             heads=[1, 2, 4, 8],
-            fusion_type=opt.fusion_type,
-            cross_space_attn=opt.cross_space_attn,
             use_curve=opt.use_curve,
             curve_M=opt.curve_M
         ).cuda()

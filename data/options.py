@@ -75,15 +75,17 @@ def option():
     parser.add_argument('--grad_detect', type=bool, default=True)  # 梯度爆炸检测
     parser.add_argument('--grad_clip', type=bool, default=True)     # 梯度裁剪
     
-    # ========== 双空间CIDNet配置（新增） ==========
+    # ========== 双空间CIDNet配置 ==========
     parser.add_argument('--dual_space', type=bool, default=True, 
-                        help='是否使用DualSpaceCIDNet（HVI+RGB双空间融合）')
-    parser.add_argument('--RGB_loss_weight', type=float, default=0.5, 
-                        help='RGB分支损失权重')
-    parser.add_argument('--cross_space_attn', type=bool, default=False, 
-                        help='是否使用跨空间交叉注意力')
-    parser.add_argument('--fusion_type', type=str, default='learnable', 
-                        help='融合类型：learnable/adaptive')
+                        help='是否使用DualSpaceCIDNet（串联版本：RGB Block → HVI CIDNet）')
+    
+    # ========== 以下参数在并联方案(方案A)中使用，当前串联方案暂不使用 ==========
+    # parser.add_argument('--RGB_loss_weight', type=float, default=0.5, 
+    #                     help='RGB分支损失权重')
+    # parser.add_argument('--cross_space_attn', type=bool, default=False, 
+    #                     help='是否使用跨空间交叉注意力')
+    # parser.add_argument('--fusion_type', type=str, default='learnable', 
+    #                     help='融合类型：learnable/adaptive')
     
     # ========== 神经曲线层消融实验 ==========
     parser.add_argument('--use_curve', type=bool, default=False,
@@ -93,12 +95,12 @@ def option():
     
     
     # choose which dataset you want to train, please only set one "True"
-    parser.add_argument('--lol_v1', type=bool, default=False)
+    parser.add_argument('--lol_v1', type=bool, default=True)
     parser.add_argument('--lolv2_real', type=bool, default=False)
     parser.add_argument('--lolv2_syn', type=bool, default=False)
     parser.add_argument('--lol_blur', type=bool, default=False)
     parser.add_argument('--SID', type=bool, default=False)
-    parser.add_argument('--SICE_mix', type=bool, default=True)
+    parser.add_argument('--SICE_mix', type=bool, default=False)
     parser.add_argument('--SICE_grad', type=bool, default=False)
     parser.add_argument('--fivek', type=bool, default=False)
     parser.add_argument('--LoLI_Street', type=bool, default=False)
