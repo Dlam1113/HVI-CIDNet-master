@@ -217,12 +217,16 @@ def build_model():
     
     # 根据配置选择模型
     if opt.dual_space:
-        print('===> 使用 DualSpaceCIDNet (串联版本: RGB Block → HVI CIDNet)')
+        print('===> 使用 DualSpaceCIDNet (v3: CIDNet + RGB后处理)')
         if opt.use_curve:
             print('===> 启用神经曲线层消融实验 (I通道全局调整)')
+        if opt.use_rgb_refiner:
+            print(f'===> 启用RGB后处理微调 (mid_ch={opt.refiner_mid_ch})')
         model = DualSpaceCIDNet(
             channels=[36, 36, 72, 144],
             heads=[1, 2, 4, 8],
+            use_rgb_refiner=opt.use_rgb_refiner,
+            refiner_mid_ch=opt.refiner_mid_ch,
             use_curve=opt.use_curve,
             curve_M=opt.curve_M
         ).cuda()
@@ -422,10 +426,8 @@ if __name__ == '__main__':
     with open(f"./results/metrics/metrics{now}.md", "w") as f:
         f.write("dataset: "+ output_folder + "\n")  
         f.write("dual_space: " + str(opt.dual_space) + "\n")
-        # ========== 以下参数在并联方案(方案A)中使用，当前串联方案暂不使用 ==========
-        # f.write("RGB_loss_weight: " + str(opt.RGB_loss_weight) + "\n")
-        # f.write("cross_space_attn: " + str(opt.cross_space_attn) + "\n")
-        # f.write("fusion_type: " + str(opt.fusion_type) + "\n")
+        f.write("use_rgb_refiner: " + str(opt.use_rgb_refiner) + "\n")
+        f.write("refiner_mid_ch: " + str(opt.refiner_mid_ch) + "\n")
         f.write("use_curve: " + str(opt.use_curve) + "\n")
         f.write("curve_M: " + str(opt.curve_M) + "\n")
         f.write(f"lr: {opt.lr}\n")  

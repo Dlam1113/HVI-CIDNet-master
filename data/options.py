@@ -77,15 +77,13 @@ def option():
     
     # ========== 双空间CIDNet配置 ==========
     parser.add_argument('--dual_space', type=bool, default=True, 
-                        help='是否使用DualSpaceCIDNet（串联版本：RGB Block → HVI CIDNet）')
+                        help='是否使用DualSpaceCIDNet（v3: CIDNet + RGB后处理）')
     
-    # ========== 以下参数在并联方案(方案A)中使用，当前串联方案暂不使用 ==========
-    # parser.add_argument('--RGB_loss_weight', type=float, default=0.5, 
-    #                     help='RGB分支损失权重')
-    # parser.add_argument('--cross_space_attn', type=bool, default=False, 
-    #                     help='是否使用跨空间交叉注意力')
-    # parser.add_argument('--fusion_type', type=str, default='learnable', 
-    #                     help='融合类型：learnable/adaptive')
+    # ========== RGB后处理配置 ==========
+    parser.add_argument('--use_rgb_refiner', type=bool, default=True,
+                        help='是否启用RGB后处理微调（消融实验可关闭）')
+    parser.add_argument('--refiner_mid_ch', type=int, default=32,
+                        help='RGB Refiner中间层通道数')
     
     # ========== 神经曲线层消融实验 ==========
     parser.add_argument('--use_curve', type=bool, default=False,
