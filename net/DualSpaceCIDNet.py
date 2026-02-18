@@ -29,31 +29,33 @@ class RGBRefiner(nn.Module):
     设计原则：
     - 极轻量（3层CNN，32通道），避免在小数据集上过拟合
     - 学习残差（输出+输入=最终结果），容易收敛
-    - 保持原始分辨率，不做下采样
+    - 最后一层零初始化，确保初始状态等价于恒等映射（correction≈0）
+    - 不使用归一化层，避免破坏残差假设
+    - 不使用clamp，与原CIDNet输出行为保持一致
     
     参数:
         in_channels: 输入通道数，默认3
-        mid_channels: 中间层通道数，默认32（比原RGB_Encoder的64更小）
+        mid_channels: 中间层通道数，默认32
     """
     
     def __init__(self, in_channels=3, mid_channels=32):
         super(RGBRefiner, self).__init__()
         
-        # 3层轻量CNN：提取→精炼→输出
-        self.refine = nn.Sequential(
-            # 层1：特征提取 3→32
-            nn.Conv2d(in_channels, mid_channels, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.InstanceNorm2d(mid_channels),
-            nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            
-            # 层2：特征精炼 32→32
-            nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=1, padding=1, bias=False),
-            nn.InstanceNorm2d(mid_channels),
-            nn.LeakyReLU(negative_slope=0.2, inplace=True),
-            
-            # 层3：输出映射 32→3（学习残差校正量）
-            nn.Conv2d(mid_channels, in_channels, kernel_size=1, stride=1, padding=0, bias=False),
-        )
+        # 层1：特征提取 3→32
+        self.conv1 = nn.Conv2d(in_channels, mid_channels, kernel_size=3, stride=1, padding=1, bias=True)
+        self.act1 = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+        
+        # 层2：特征精炼 32→32
+        self.conv2 = nn.Conv2d(mid_channels, mid_channels, kernel_size=3, stride=1, padding=1, bias=True)
+        self.act2 = nn.LeakyReLU(negative_slope=0.2, inplace=True)
+        
+        # 层3：输出映射 32→3（学习残差校正量）
+        self.conv3 = nn.Conv2d(mid_channels, in_channels, kernel_size=1, stride=1, padding=0, bias=True)
+        
+        # 关键：最后一层零初始化，确保初始输出 correction ≈ 0
+        # 这样模型一开始就是恒等映射，CIDNet能正常接收梯度
+        nn.init.zeros_(self.conv3.weight)
+        nn.init.zeros_(self.conv3.bias)
     
     def forward(self, x):
         """
@@ -64,8 +66,10 @@ class RGBRefiner(nn.Module):
         返回:
             校正后的RGB图像 [B, 3, H, W]
         """
-        correction = self.refine(x)            # 学习残差校正量
-        out = torch.clamp(x + correction, 0, 1)  # 残差连接 + 截断
+        h = self.act1(self.conv1(x))
+        h = self.act2(self.conv2(h))
+        correction = self.conv3(h)      # 初始时 ≈ 0（零初始化）
+        out = x + correction            # 残差连接，不clamp（与原CIDNet一致）
         return out
 
 
