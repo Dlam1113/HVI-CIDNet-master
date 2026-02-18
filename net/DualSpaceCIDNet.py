@@ -263,6 +263,10 @@ class DualSpaceCIDNet(nn.Module, PyTorchModelHubMixin):
         else:
             output_rgb = cidnet_rgb
         
+        # 截断到[0,1]，防止极端值导致VGG感知损失产生NaN
+        # 配合零初始化：初期correction≈0，clamp几乎不激活，不影响梯度流
+        output_rgb = torch.clamp(output_rgb, 0, 1)
+        
         return output_rgb  # 与原CIDNet返回格式完全兼容
     
     def HVIT(self, x):
