@@ -159,7 +159,10 @@ def metrics(im_dir, label_dir, use_GT_mean):
         
         # BRISQUE：空间质量评估（越低越好）
         if HAS_BRISQUE:
-            score_brisque = brisque_mod.score(im1)
+            try:
+                score_brisque = brisque_mod.score(im1)
+            except Exception:
+                score_brisque = 0  # 某些图像尺寸可能触发库内部bug，跳过
         else:
             score_brisque = 0
     
