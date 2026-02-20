@@ -82,7 +82,7 @@ def option():
     # ========== RGB后处理配置 ==========
     parser.add_argument('--use_rgb_refiner', type=bool, default=True,
                         help='是否启用RGB后处理微调（消融实验可关闭）')
-    parser.add_argument('--refiner_mid_ch', type=int, default=32,
+    parser.add_argument('--refiner_mid_ch', type=int, default=64,
                         help='RGB Refiner中间层通道数')
     
     # ========== 神经曲线层消融实验 ==========

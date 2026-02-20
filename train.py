@@ -302,10 +302,14 @@ if __name__ == '__main__':
     '''
     #峰值信噪比
     psnr = []
-    #结构相似性：是一种衡量两幅图像相似度的指标，常用于评估图像失真前后的相似性
+    #结构相似性
     ssim = []
-    #学习感知图像块相似度也称感知损失，越低越好
+    #学习感知图像块相似度（越低越好）
     lpips = []
+    # NIQE自然度（越低越好，无参考指标）
+    niqe = []
+    # BRISQUE空间质量（越低越好，无参考指标）
+    brisque = []
     start_epoch=0
     if opt.start_epoch > 0:
         start_epoch = opt.start_epoch
@@ -375,26 +379,34 @@ if __name__ == '__main__':
                     norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
             
             # 计算评估指标
-            avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)#metric就是评价指标的意思，use_GT_mean：是否使用亮度校正
+            avg_psnr, avg_ssim, avg_lpips, avg_niqe, avg_brisque = metrics(im_dir, label_dir, use_GT_mean=False)
             print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
             print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
             print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
+            print("===> Avg.NIQE: {:.4f} ".format(avg_niqe))
+            print("===> Avg.BRISQUE: {:.4f} ".format(avg_brisque))
                 
             # 保存指标到列表
             psnr.append(avg_psnr)
             ssim.append(avg_ssim)
             lpips.append(avg_lpips)
+            niqe.append(avg_niqe)
+            brisque.append(avg_brisque)
                 
             # 【TensorBoard记录】记录评估指标
             writer.add_scalar('Eval/PSNR', avg_psnr, epoch)
             writer.add_scalar('Eval/SSIM', avg_ssim, epoch)
             writer.add_scalar('Eval/LPIPS', avg_lpips, epoch)
+            writer.add_scalar('Eval/NIQE', avg_niqe, epoch)
+            writer.add_scalar('Eval/BRISQUE', avg_brisque, epoch)
                 
             # 同时在一个图中显示所有指标的变化趋势
             writer.add_scalars('Eval/All_Metrics', {
                 'PSNR': avg_psnr,
-                'SSIM': avg_ssim * 30,  # 放大SSIM以便在同一图中观察
-                'LPIPS': avg_lpips * 100  # 放大LPIPS以便在同一图中观察
+                'SSIM': avg_ssim * 30,
+                'LPIPS': avg_lpips * 100,
+                'NIQE': avg_niqe,
+                'BRISQUE': avg_brisque / 5  # 缩小BRISQUE以便在同一图中观察
             }, epoch)
             print(psnr)
             print(ssim)
@@ -410,19 +422,25 @@ if __name__ == '__main__':
         best_psnr = max(psnr)
         best_ssim = max(ssim)
         best_lpips = min(lpips)
+        best_niqe = min(niqe) if niqe else 0
+        best_brisque = min(brisque) if brisque else 0
         best_psnr_epoch = (psnr.index(best_psnr) + 1) * opt.snapshots
         best_ssim_epoch = (ssim.index(best_ssim) + 1) * opt.snapshots
         best_lpips_epoch = (lpips.index(best_lpips) + 1) * opt.snapshots
+        best_niqe_epoch = (niqe.index(best_niqe) + 1) * opt.snapshots if niqe else 0
+        best_brisque_epoch = (brisque.index(best_brisque) + 1) * opt.snapshots if brisque else 0
         
         writer.add_text('Final_Results/Best_PSNR', f'{best_psnr:.4f} at Epoch {best_psnr_epoch}')
         writer.add_text('Final_Results/Best_SSIM', f'{best_ssim:.4f} at Epoch {best_ssim_epoch}')
         writer.add_text('Final_Results/Best_LPIPS', f'{best_lpips:.4f} at Epoch {best_lpips_epoch}')
+        writer.add_text('Final_Results/Best_NIQE', f'{best_niqe:.4f} at Epoch {best_niqe_epoch}')
+        writer.add_text('Final_Results/Best_BRISQUE', f'{best_brisque:.4f} at Epoch {best_brisque_epoch}')
     
     writer.close()
     print(f"===> TensorBoard日志已保存到: {log_dir}")
     
-    #将训练过程中的所有评估指标（PSNR、SSIM、LPIPS）和训练配置保存到一个格式化的 Markdown 文件中，便于后续查看和比较实验结果。    
-    now = datetime.now().strftime("%Y-%m-%d-%H%M%S")#获取当前日期并格式化时间字符串，（）里都是对应日期缩写eg：%Y是year
+    # 保存所有指标到Markdown文件
+    now = datetime.now().strftime("%Y-%m-%d-%H%M%S")
     with open(f"./results/metrics/metrics{now}.md", "w") as f:
         f.write("dataset: "+ output_folder + "\n")  
         f.write("dual_space: " + str(opt.dual_space) + "\n")
@@ -440,15 +458,32 @@ if __name__ == '__main__':
         f.write(f"E_weight: {opt.E_weight}\n")  
         f.write(f"P_weight: {opt.P_weight}\n")
         f.write(f"TensorBoard日志: {log_dir}\n\n")
+        
+        # 最佳结果汇总
         best_psnr_idx = psnr.index(max(psnr))
         best_ssim_idx = ssim.index(max(ssim))
         best_lpips_idx = lpips.index(min(lpips))
+        best_niqe_idx = niqe.index(min(niqe)) if niqe else 0
+        best_brisque_idx = brisque.index(min(brisque)) if brisque else 0
+        
         f.write("## 最佳结果\n\n")
         f.write(f"- **最佳PSNR**: {max(psnr):.4f} (Epoch {(best_psnr_idx+1)*opt.snapshots})\n")
         f.write(f"- **最佳SSIM**: {max(ssim):.4f} (Epoch {(best_ssim_idx+1)*opt.snapshots})\n")
-        f.write(f"- **最低LPIPS**: {min(lpips):.4f} (Epoch {(best_lpips_idx+1)*opt.snapshots})\n\n")  
-        f.write("| Epochs | PSNR | SSIM | LPIPS |\n")  
-        f.write("|----------------------|----------------------|----------------------|----------------------|\n")  
-        for i in range(len(psnr)):
-            f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | { psnr[i]:.4f} | {ssim[i]:.4f} | {lpips[i]:.4f} |\n")  
+        f.write(f"- **最低LPIPS**: {min(lpips):.4f} (Epoch {(best_lpips_idx+1)*opt.snapshots})\n")
+        f.write(f"- **最低NIQE**: {min(niqe):.4f} (Epoch {(best_niqe_idx+1)*opt.snapshots})\n")
+        f.write(f"- **最低BRISQUE**: {min(brisque):.4f} (Epoch {(best_brisque_idx+1)*opt.snapshots})\n\n")
         
+        # 指标表格（含新指标）
+        f.write("| Epochs | PSNR | SSIM | LPIPS | NIQE | BRISQUE |\n")  
+        f.write("|--------|------|------|-------|------|---------|\n")  
+        for i in range(len(psnr)):
+            f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | {psnr[i]:.4f} | {ssim[i]:.4f} | {lpips[i]:.4f} | {niqe[i]:.4f} | {brisque[i]:.4f} |\n")
+        
+        f.write(f"\n## 最终结果\n\n")
+        f.write(f"| 指标 | 最佳值 | 对应Epoch |\n")
+        f.write(f"|------|--------|----------|\n")
+        f.write(f"| PSNR ↑ | {max(psnr):.4f} | {(best_psnr_idx+1)*opt.snapshots} |\n")
+        f.write(f"| SSIM ↑ | {max(ssim):.4f} | {(best_ssim_idx+1)*opt.snapshots} |\n")
+        f.write(f"| LPIPS ↓ | {min(lpips):.4f} | {(best_lpips_idx+1)*opt.snapshots} |\n")
+        f.write(f"| NIQE ↓ | {min(niqe):.4f} | {(best_niqe_idx+1)*opt.snapshots} |\n")
+        f.write(f"| BRISQUE ↓ | {min(brisque):.4f} | {(best_brisque_idx+1)*opt.snapshots} |\n")

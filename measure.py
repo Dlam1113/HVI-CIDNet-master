@@ -9,6 +9,13 @@ from PIL import Image
 from tqdm import tqdm
 import argparse
 import platform
+from loss.niqe_utils import calculate_niqe  # NIQE无参考指标
+try:
+    import imquality.brisque as brisque_mod  # BRISQUE无参考指标
+    HAS_BRISQUE = True
+except ImportError:
+    HAS_BRISQUE = False
+    print("警告: imquality库未安装，BRISQUE指标将跳过。安装: pip install image-quality")
 
 mea_parser = argparse.ArgumentParser(description='Measure')
 mea_parser.add_argument('--use_GT_mean', action='store_true', help='Use the mean of GT to rectify the output of the model')
@@ -71,19 +78,32 @@ def calculate_psnr(target, ref):
     return psnr
 
 def metrics(im_dir, label_dir, use_GT_mean):
+    """
+    计算图像质量评估指标
+    
+    全参考指标（需要GT）：PSNR、SSIM、LPIPS
+    无参考指标（不需GT）：NIQE、BRISQUE
+    
+    参数:
+        im_dir: 模型输出图像目录
+        label_dir: 真值图像目录
+        use_GT_mean: 是否使用GT均值校正亮度
+    返回:
+        avg_psnr, avg_ssim, avg_lpips, avg_niqe, avg_brisque
+    """
     avg_psnr = 0
     avg_ssim = 0
     avg_lpips = 0
+    avg_niqe = 0
+    avg_brisque = 0
     n = 0
     loss_fn = lpips.LPIPS(net='alex')
     loss_fn.cuda()
     
     # 支持多种图片格式匹配
     if '*' in im_dir:
-        # 如果已经包含通配符，直接使用
         im_files = sorted(glob.glob(im_dir))
     else:
-        # 如果是目录路径，匹配多种图片格式
         im_files = sorted(
             glob.glob(im_dir + '*.png') + 
             glob.glob(im_dir + '*.jpg') + 
@@ -96,7 +116,7 @@ def metrics(im_dir, label_dir, use_GT_mean):
         
         im1 = Image.open(item).convert('RGB') 
 
-         # 跨平台路径处理（Windows用反斜杠，Linux用斜杠）
+        # 跨平台路径处理（Windows用反斜杠，Linux用斜杠）
         os_name = platform.system()
         if os_name.lower() == 'windows':
             name = item.split('\\')[-1]
@@ -105,12 +125,10 @@ def metrics(im_dir, label_dir, use_GT_mean):
         else:
             name = item.split('/')[-1]
         
-        # 尝试多种扩展名匹配GT文件（解决大小写问题）
+        # 尝试多种扩展名匹配GT文件
         gt_path = label_dir + name
         if not os.path.exists(gt_path):
-            # 获取文件名和扩展名
             name_without_ext = os.path.splitext(name)[0]
-            # 尝试不同的扩展名
             for ext in ['.JPG', '.jpg', '.png', '.PNG', '.jpeg', '.JPEG']:
                 alt_path = label_dir + name_without_ext + ext
                 if os.path.exists(alt_path):
@@ -120,30 +138,36 @@ def metrics(im_dir, label_dir, use_GT_mean):
         im2 = Image.open(gt_path).convert('RGB')
         (h, w) = im2.size
         im1 = im1.resize((h, w))  
-        im1 = np.array(im1) # 转为numpy数组 [H, W, 3]
-        im2 = np.array(im2)
+        im1_np = np.array(im1)  # [H, W, 3], uint8
+        im2_np = np.array(im2)
         
-        if use_GT_mean:  # 如果启用亮度校正，将预测图像的平均亮度调整到与真实图像相同，从而消除整体亮度偏差
-            # 计算预测图像的灰度均值
-            mean_restored = cv2.cvtColor(im1, cv2.COLOR_RGB2GRAY).mean()
-            
-            # 计算真实图像的灰度均值
-            mean_target = cv2.cvtColor(im2, cv2.COLOR_RGB2GRAY).mean()
-            
-            # 按比例调整预测图像的亮度，使其均值与GT一致
-            im1 = np.clip(im1 * (mean_target/mean_restored), 0, 255)
+        if use_GT_mean:
+            mean_restored = cv2.cvtColor(im1_np, cv2.COLOR_RGB2GRAY).mean()
+            mean_target = cv2.cvtColor(im2_np, cv2.COLOR_RGB2GRAY).mean()
+            im1_np = np.clip(im1_np * (mean_target/mean_restored), 0, 255)
         
-        score_psnr = calculate_psnr(im1, im2)
-        score_ssim = calculate_ssim(im1, im2)
-        ex_p0 = lpips.im2tensor(im1).cuda()#把图片从numpy转换到Lpips需要的张量
-        ex_ref = lpips.im2tensor(im2).cuda()
-        
-
+        # ========== 全参考指标 ==========
+        score_psnr = calculate_psnr(im1_np, im2_np)
+        score_ssim = calculate_ssim(im1_np, im2_np)
+        ex_p0 = lpips.im2tensor(im1_np).cuda()
+        ex_ref = lpips.im2tensor(im2_np).cuda()
         score_lpips = loss_fn.forward(ex_ref, ex_p0)
+        
+        # ========== 无参考指标 ==========
+        # NIQE：自然度评估（越低越好）
+        score_niqe = calculate_niqe(im1_np, input_order='HWC', convert_to='y')
+        
+        # BRISQUE：空间质量评估（越低越好）
+        if HAS_BRISQUE:
+            score_brisque = brisque_mod.score(im1)
+        else:
+            score_brisque = 0
     
         avg_psnr += score_psnr
         avg_ssim += score_ssim
         avg_lpips += score_lpips.item()
+        avg_niqe += score_niqe
+        avg_brisque += score_brisque
         torch.cuda.empty_cache()
     
     # 防止除以零错误
@@ -152,12 +176,14 @@ def metrics(im_dir, label_dir, use_GT_mean):
         print(f"  im_dir: {im_dir}")
         print(f"  label_dir: {label_dir}")
         print(f"  请检查路径是否正确，以及文件扩展名是否匹配")
-        return 0, 0, 0
+        return 0, 0, 0, 0, 0
 
     avg_psnr = avg_psnr / n
     avg_ssim = avg_ssim / n
     avg_lpips = avg_lpips / n
-    return avg_psnr, avg_ssim, avg_lpips
+    avg_niqe = avg_niqe / n
+    avg_brisque = avg_brisque / n
+    return avg_psnr, avg_ssim, avg_lpips, avg_niqe, avg_brisque
 
 
 if __name__ == '__main__':
@@ -181,7 +207,9 @@ if __name__ == '__main__':
         im_dir = './output/fivek/*.jpg'
         label_dir = './datasets/FiveK/test/target/'
 
-    avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, mea.use_GT_mean)
+    avg_psnr, avg_ssim, avg_lpips, avg_niqe, avg_brisque = metrics(im_dir, label_dir, mea.use_GT_mean)
     print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
     print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
     print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
+    print("===> Avg.NIQE: {:.4f} ".format(avg_niqe))
+    print("===> Avg.BRISQUE: {:.4f} ".format(avg_brisque))
