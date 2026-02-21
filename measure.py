@@ -158,11 +158,12 @@ def metrics(im_dir, label_dir, use_GT_mean):
         score_niqe = calculate_niqe(im1_np, input_order='HWC', convert_to='y')
         
         # BRISQUE：空间质量评估（越低越好）
+        # 注意：传入numpy RGB数组，避免imquality内部rgb2gray二次转换bug
         if HAS_BRISQUE:
             try:
-                score_brisque = brisque_mod.score(im1)
+                score_brisque = brisque_mod.score(im1_np)
             except Exception:
-                score_brisque = 0  # 某些图像尺寸可能触发库内部bug，跳过
+                score_brisque = 0
         else:
             score_brisque = 0
     

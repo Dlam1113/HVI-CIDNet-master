@@ -247,15 +247,18 @@ def make_scheduler():
     
     # 步骤2: 根据配置选择调度器
     if opt.cos_restart_cyclic:  # 使用循环余弦退火
+        # 两段周期与两阶段训练对齐：
+        # 第一段 = freeze_epoch（联合训练期，lr从高到低）
+        # 第二段 = 剩余epoch（冻结CIDNet后，lr重新拉高再衰减）
+        freeze_ep = opt.freeze_epoch if opt.freeze_epoch > 0 else opt.nEpochs // 4
+        remaining = opt.nEpochs - freeze_ep - opt.start_epoch
         if opt.start_warmup:  # 如果启用warmup
-            # 2.1 先创建余弦退火调度器（作为主调度器）
             scheduler_step = CosineAnnealingRestartCyclicLR(
                 optimizer=optimizer, 
-                periods=[(opt.nEpochs//4)-opt.warmup_epochs, (opt.nEpochs*3)//4],
-                restart_weights=[1, 1], # 重启时的权重
-                eta_mins=[0.0002, 0.0000001] # 每个周期的最小学习率
+                periods=[freeze_ep - opt.warmup_epochs, remaining],
+                restart_weights=[1, 1],
+                eta_mins=[0.0002, 0.0000001]
             )
-            # 2.2 用warmup调度器包装主调度器
             scheduler = GradualWarmupScheduler(
                 optimizer, 
                 multiplier=1, 
@@ -263,7 +266,11 @@ def make_scheduler():
                 after_scheduler=scheduler_step
             )
         else:
-            scheduler = CosineAnnealingRestartCyclicLR(optimizer=optimizer, periods=[opt.nEpochs//4, (opt.nEpochs*3)//4], restart_weights=[1,1],eta_mins=[0.0002,0.0000001])
+            scheduler = CosineAnnealingRestartCyclicLR(
+                optimizer=optimizer, 
+                periods=[freeze_ep - opt.start_epoch, remaining],
+                restart_weights=[1, 1],
+                eta_mins=[0.0002, 0.0000001])
     elif opt.cos_restart:
         if opt.start_warmup:
             scheduler_step = CosineAnnealingRestartLR(optimizer=optimizer, periods=[opt.nEpochs - opt.warmup_epochs - opt.start_epoch], restart_weights=[1],eta_min=1e-7)
@@ -325,7 +332,48 @@ if __name__ == '__main__':
     
     
         
+    # 标记是否已冻结CIDNet
+    cidnet_frozen = False
+    
     for epoch in range(start_epoch+1, opt.nEpochs + 1):
+        # ========== 两阶段训练：到达freeze_epoch时冻结CIDNet ==========
+        if (opt.dual_space and opt.use_rgb_refiner and opt.freeze_epoch > 0
+                and epoch == opt.freeze_epoch and not cidnet_frozen):
+            print(f"\n{'='*60}")
+            print(f"===> Epoch {epoch}: 冻结CIDNet，只训练RGB Refiner")
+            print(f"{'='*60}")
+            
+            # 冻结所有非Refiner的参数
+            frozen_count = 0
+            trainable_count = 0
+            for name, param in model.named_parameters():
+                if 'rgb_refiner' not in name:
+                    param.requires_grad = False
+                    frozen_count += 1
+                else:
+                    trainable_count += 1
+            
+            print(f"  冻结参数组数: {frozen_count}")
+            print(f"  可训练参数组数: {trainable_count}")
+            
+            # 重建优化器，只包含Refiner参数
+            refiner_params = [p for p in model.parameters() if p.requires_grad]
+            optimizer = optim.Adam(refiner_params, lr=opt.lr)
+            # 重建调度器绑定新optimizer，第二段余弦衰减
+            remaining_epochs = opt.nEpochs - opt.freeze_epoch
+            scheduler = CosineAnnealingRestartCyclicLR(
+                optimizer=optimizer,
+                periods=[remaining_epochs],
+                restart_weights=[1],
+                eta_mins=[0.0000001])
+            
+            cidnet_frozen = True
+            
+            # TensorBoard记录冻结事件
+            if writer is not None:
+                writer.add_text('Training/Event', 
+                    f'Epoch {epoch}: CIDNet frozen, only training Refiner')
+        
         # 训练一个epoch，传入writer
         epoch_loss, batch_num = train(epoch, writer=writer)
         scheduler.step()  # 通过调度器更新学习率
@@ -457,6 +505,7 @@ if __name__ == '__main__':
         f.write(f"D_weight: {opt.D_weight}\n")  
         f.write(f"E_weight: {opt.E_weight}\n")  
         f.write(f"P_weight: {opt.P_weight}\n")
+        f.write(f"freeze_epoch: {opt.freeze_epoch}\n")
         f.write(f"TensorBoard日志: {log_dir}\n\n")
         
         # 最佳结果汇总
