@@ -360,7 +360,8 @@ if __name__ == '__main__':
             refiner_params = [p for p in model.parameters() if p.requires_grad]
             optimizer = optim.Adam(refiner_params, lr=opt.lr)
             # 重建调度器绑定新optimizer，第二段余弦衰减
-            remaining_epochs = opt.nEpochs - opt.freeze_epoch
+            # +1 是因为冻结当轮也会调用scheduler.step()，避免最后一轮超出周期
+            remaining_epochs = opt.nEpochs - opt.freeze_epoch + 1
             scheduler = CosineAnnealingRestartCyclicLR(
                 optimizer=optimizer,
                 periods=[remaining_epochs],
