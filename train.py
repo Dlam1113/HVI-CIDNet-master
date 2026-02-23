@@ -247,9 +247,8 @@ def make_scheduler():
     
     # 步骤2: 根据配置选择调度器
     if opt.cos_restart_cyclic:  # 使用循环余弦退火
-        # 两段周期与两阶段训练对齐：
-        # 第一段 = freeze_epoch（联合训练期，lr: 0.0001 → 1e-5）
-        # 第二段 = 剩余epoch（只训Refiner，lr: 0.0001 → 1e-6）
+        # 两段周期：第一段快速探索，第二段精细调整
+        # 与0221成功实验保持一致的配置
         freeze_ep = opt.freeze_epoch if opt.freeze_epoch > 0 else opt.nEpochs // 4
         remaining = opt.nEpochs - freeze_ep - opt.start_epoch
         if opt.start_warmup:  # 如果启用warmup
@@ -257,7 +256,7 @@ def make_scheduler():
                 optimizer=optimizer, 
                 periods=[freeze_ep - opt.warmup_epochs, remaining],
                 restart_weights=[1, 1],
-                eta_mins=[1e-5, 1e-6]  # 必须低于base_lr=0.0001
+                eta_mins=[0.0002, 0.0000001]
             )
             scheduler = GradualWarmupScheduler(
                 optimizer, 
@@ -270,7 +269,7 @@ def make_scheduler():
                 optimizer=optimizer, 
                 periods=[freeze_ep - opt.start_epoch, remaining],
                 restart_weights=[1, 1],
-                eta_mins=[1e-5, 1e-6])  # 必须低于base_lr=0.0001
+                eta_mins=[0.0002, 0.0000001])
     elif opt.cos_restart:
         if opt.start_warmup:
             scheduler_step = CosineAnnealingRestartLR(optimizer=optimizer, periods=[opt.nEpochs - opt.warmup_epochs - opt.start_epoch], restart_weights=[1],eta_min=1e-7)

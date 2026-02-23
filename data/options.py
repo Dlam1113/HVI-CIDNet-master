@@ -18,8 +18,8 @@ def option():
     parser.add_argument('--accum_steps', type=int, default=1, help='gradient accumulation steps')
 
     # choose a scheduler 学习率调度器的作用是使学习率周期性变化帮助模型跳过局部最优解
-    parser.add_argument('--cos_restart_cyclic', type=bool, default=False)
-    parser.add_argument('--cos_restart', type=bool, default=True)
+    parser.add_argument('--cos_restart_cyclic', type=bool, default=True)
+    parser.add_argument('--cos_restart', type=bool, default=False)
 
     # warmup training
     parser.add_argument('--warmup_epochs', type=int, default=3, help='warmup_epochs')
@@ -84,7 +84,7 @@ def option():
                         help='是否启用RGB后处理微调（消融实验可关闭）')
     parser.add_argument('--refiner_mid_ch', type=int, default=64,
                         help='RGB Refiner中间层通道数')
-    parser.add_argument('--freeze_epoch', type=int, default=350,
+    parser.add_argument('--freeze_epoch', type=int, default=0,
                         help='第几个epoch冻结CIDNet只训练Refiner（0=不冻结）')
     
     # ========== 神经曲线层消融实验 ==========
