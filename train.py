@@ -359,14 +359,13 @@ if __name__ == '__main__':
             # 重建优化器，只包含Refiner参数
             refiner_params = [p for p in model.parameters() if p.requires_grad]
             optimizer = optim.Adam(refiner_params, lr=opt.lr)
-            # 重建调度器绑定新optimizer，第二段余弦衰减
-            # +1 是因为冻结当轮也会调用scheduler.step()，避免最后一轮超出周期
+            # Refiner用独立的单段余弦衰减（与CIDNet训练阶段风格一致）
             remaining_epochs = opt.nEpochs - opt.freeze_epoch + 1
-            scheduler = CosineAnnealingRestartCyclicLR(
+            scheduler = CosineAnnealingRestartLR(
                 optimizer=optimizer,
                 periods=[remaining_epochs],
                 restart_weights=[1],
-                eta_mins=[1e-6])  # 与初始调度器第二段一致
+                eta_min=1e-7)
             
             cidnet_frozen = True
             

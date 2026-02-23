@@ -18,8 +18,8 @@ def option():
     parser.add_argument('--accum_steps', type=int, default=1, help='gradient accumulation steps')
 
     # choose a scheduler 学习率调度器的作用是使学习率周期性变化帮助模型跳过局部最优解
-    parser.add_argument('--cos_restart_cyclic', type=bool, default=True)
-    parser.add_argument('--cos_restart', type=bool, default=False)
+    parser.add_argument('--cos_restart_cyclic', type=bool, default=False)
+    parser.add_argument('--cos_restart', type=bool, default=True)
 
     # warmup training
     parser.add_argument('--warmup_epochs', type=int, default=3, help='warmup_epochs')
