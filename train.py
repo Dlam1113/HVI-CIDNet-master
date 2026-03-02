@@ -248,13 +248,12 @@ def make_scheduler():
     # 步骤2: 根据配置选择调度器
     if opt.cos_restart_cyclic:  # 使用循环余弦退火
         # 两段周期：第一段快速探索，第二段精细调整
-        # 与0221成功实验保持一致的配置
-        freeze_ep = opt.freeze_epoch if opt.freeze_epoch > 0 else opt.nEpochs // 4
-        remaining = opt.nEpochs - freeze_ep - opt.start_epoch
+        phase1 = opt.nEpochs // 4
+        remaining = opt.nEpochs - phase1 - opt.start_epoch
         if opt.start_warmup:  # 如果启用warmup
             scheduler_step = CosineAnnealingRestartCyclicLR(
                 optimizer=optimizer, 
-                periods=[freeze_ep - opt.warmup_epochs, remaining],
+                periods=[phase1 - opt.warmup_epochs, remaining],
                 restart_weights=[1, 1],
                 eta_mins=[0.0002, 0.0000001]
             )
@@ -267,7 +266,7 @@ def make_scheduler():
         else:
             scheduler = CosineAnnealingRestartCyclicLR(
                 optimizer=optimizer, 
-                periods=[freeze_ep - opt.start_epoch, remaining],
+                periods=[phase1 - opt.start_epoch, remaining],
                 restart_weights=[1, 1],
                 eta_mins=[0.0002, 0.0000001])
     elif opt.cos_restart:
@@ -312,10 +311,6 @@ if __name__ == '__main__':
     ssim = []
     #学习感知图像块相似度（越低越好）
     lpips = []
-    # NIQE自然度（越低越好，无参考指标）
-    niqe = []
-    # BRISQUE空间质量（越低越好，无参考指标）
-    brisque = []
     start_epoch=0
     if opt.start_epoch > 0:
         start_epoch = opt.start_epoch
@@ -330,48 +325,7 @@ if __name__ == '__main__':
     print(f"===> 启动TensorBoard: tensorboard --logdir=runs")
     
     
-        
-    # 标记是否已冻结CIDNet
-    cidnet_frozen = False
-    
     for epoch in range(start_epoch+1, opt.nEpochs + 1):
-        # ========== 两阶段训练：到达freeze_epoch时冻结CIDNet ==========
-        if (opt.dual_space and opt.use_rgb_refiner and opt.freeze_epoch > 0
-                and epoch == opt.freeze_epoch and not cidnet_frozen):
-            print(f"\n{'='*60}")
-            print(f"===> Epoch {epoch}: 冻结CIDNet，只训练RGB Refiner")
-            print(f"{'='*60}")
-            
-            # 冻结所有非Refiner的参数
-            frozen_count = 0
-            trainable_count = 0
-            for name, param in model.named_parameters():
-                if 'rgb_refiner' not in name:
-                    param.requires_grad = False
-                    frozen_count += 1
-                else:
-                    trainable_count += 1
-            
-            print(f"  冻结参数组数: {frozen_count}")
-            print(f"  可训练参数组数: {trainable_count}")
-            
-            # 重建优化器，只包含Refiner参数
-            refiner_params = [p for p in model.parameters() if p.requires_grad]
-            optimizer = optim.Adam(refiner_params, lr=opt.lr)
-            # Refiner用独立的单段余弦衰减（与CIDNet训练阶段风格一致）
-            remaining_epochs = opt.nEpochs - opt.freeze_epoch + 1
-            scheduler = CosineAnnealingRestartLR(
-                optimizer=optimizer,
-                periods=[remaining_epochs],
-                restart_weights=[1],
-                eta_min=1e-7)
-            
-            cidnet_frozen = True
-            
-            # TensorBoard记录冻结事件
-            if writer is not None:
-                writer.add_text('Training/Event', 
-                    f'Epoch {epoch}: CIDNet frozen, only training Refiner')
         
         # 训练一个epoch，传入writer
         epoch_loss, batch_num = train(epoch, writer=writer)
@@ -426,34 +380,26 @@ if __name__ == '__main__':
                     norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
             
             # 计算评估指标
-            avg_psnr, avg_ssim, avg_lpips, avg_niqe, avg_brisque = metrics(im_dir, label_dir, use_GT_mean=False)
+            avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)
             print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
             print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
             print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
-            print("===> Avg.NIQE: {:.4f} ".format(avg_niqe))
-            print("===> Avg.BRISQUE: {:.4f} ".format(avg_brisque))
                 
             # 保存指标到列表
             psnr.append(avg_psnr)
             ssim.append(avg_ssim)
             lpips.append(avg_lpips)
-            niqe.append(avg_niqe)
-            brisque.append(avg_brisque)
                 
             # 【TensorBoard记录】记录评估指标
             writer.add_scalar('Eval/PSNR', avg_psnr, epoch)
             writer.add_scalar('Eval/SSIM', avg_ssim, epoch)
             writer.add_scalar('Eval/LPIPS', avg_lpips, epoch)
-            writer.add_scalar('Eval/NIQE', avg_niqe, epoch)
-            writer.add_scalar('Eval/BRISQUE', avg_brisque, epoch)
                 
             # 同时在一个图中显示所有指标的变化趋势
             writer.add_scalars('Eval/All_Metrics', {
                 'PSNR': avg_psnr,
                 'SSIM': avg_ssim * 30,
                 'LPIPS': avg_lpips * 100,
-                'NIQE': avg_niqe,
-                'BRISQUE': avg_brisque / 5  # 缩小BRISQUE以便在同一图中观察
             }, epoch)
             print(psnr)
             print(ssim)
@@ -469,19 +415,13 @@ if __name__ == '__main__':
         best_psnr = max(psnr)
         best_ssim = max(ssim)
         best_lpips = min(lpips)
-        best_niqe = min(niqe) if niqe else 0
-        best_brisque = min(brisque) if brisque else 0
         best_psnr_epoch = (psnr.index(best_psnr) + 1) * opt.snapshots
         best_ssim_epoch = (ssim.index(best_ssim) + 1) * opt.snapshots
         best_lpips_epoch = (lpips.index(best_lpips) + 1) * opt.snapshots
-        best_niqe_epoch = (niqe.index(best_niqe) + 1) * opt.snapshots if niqe else 0
-        best_brisque_epoch = (brisque.index(best_brisque) + 1) * opt.snapshots if brisque else 0
         
         writer.add_text('Final_Results/Best_PSNR', f'{best_psnr:.4f} at Epoch {best_psnr_epoch}')
         writer.add_text('Final_Results/Best_SSIM', f'{best_ssim:.4f} at Epoch {best_ssim_epoch}')
         writer.add_text('Final_Results/Best_LPIPS', f'{best_lpips:.4f} at Epoch {best_lpips_epoch}')
-        writer.add_text('Final_Results/Best_NIQE', f'{best_niqe:.4f} at Epoch {best_niqe_epoch}')
-        writer.add_text('Final_Results/Best_BRISQUE', f'{best_brisque:.4f} at Epoch {best_brisque_epoch}')
     
     writer.close()
     print(f"===> TensorBoard日志已保存到: {log_dir}")
@@ -504,28 +444,23 @@ if __name__ == '__main__':
         f.write(f"D_weight: {opt.D_weight}\n")  
         f.write(f"E_weight: {opt.E_weight}\n")  
         f.write(f"P_weight: {opt.P_weight}\n")
-        f.write(f"freeze_epoch: {opt.freeze_epoch}\n")
         f.write(f"TensorBoard日志: {log_dir}\n\n")
         
         # 最佳结果汇总
         best_psnr_idx = psnr.index(max(psnr))
         best_ssim_idx = ssim.index(max(ssim))
         best_lpips_idx = lpips.index(min(lpips))
-        best_niqe_idx = niqe.index(min(niqe)) if niqe else 0
-        best_brisque_idx = brisque.index(min(brisque)) if brisque else 0
         
         f.write("## 最佳结果\n\n")
         f.write(f"- **最佳PSNR**: {max(psnr):.4f} (Epoch {(best_psnr_idx+1)*opt.snapshots})\n")
         f.write(f"- **最佳SSIM**: {max(ssim):.4f} (Epoch {(best_ssim_idx+1)*opt.snapshots})\n")
-        f.write(f"- **最低LPIPS**: {min(lpips):.4f} (Epoch {(best_lpips_idx+1)*opt.snapshots})\n")
-        f.write(f"- **最低NIQE**: {min(niqe):.4f} (Epoch {(best_niqe_idx+1)*opt.snapshots})\n")
-        f.write(f"- **最低BRISQUE**: {min(brisque):.4f} (Epoch {(best_brisque_idx+1)*opt.snapshots})\n\n")
+        f.write(f"- **最低LPIPS**: {min(lpips):.4f} (Epoch {(best_lpips_idx+1)*opt.snapshots})\n\n")
         
-        # 指标表格（含新指标）
-        f.write("| Epochs | PSNR | SSIM | LPIPS | NIQE | BRISQUE |\n")  
-        f.write("|--------|------|------|-------|------|---------|\n")  
+        # 指标表格
+        f.write("| Epochs | PSNR | SSIM | LPIPS |\n")  
+        f.write("|--------|------|------|-------|\n")  
         for i in range(len(psnr)):
-            f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | {psnr[i]:.4f} | {ssim[i]:.4f} | {lpips[i]:.4f} | {niqe[i]:.4f} | {brisque[i]:.4f} |\n")
+            f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | {psnr[i]:.4f} | {ssim[i]:.4f} | {lpips[i]:.4f} |\n")
         
         f.write(f"\n## 最终结果\n\n")
         f.write(f"| 指标 | 最佳值 | 对应Epoch |\n")
@@ -533,5 +468,3 @@ if __name__ == '__main__':
         f.write(f"| PSNR ↑ | {max(psnr):.4f} | {(best_psnr_idx+1)*opt.snapshots} |\n")
         f.write(f"| SSIM ↑ | {max(ssim):.4f} | {(best_ssim_idx+1)*opt.snapshots} |\n")
         f.write(f"| LPIPS ↓ | {min(lpips):.4f} | {(best_lpips_idx+1)*opt.snapshots} |\n")
-        f.write(f"| NIQE ↓ | {min(niqe):.4f} | {(best_niqe_idx+1)*opt.snapshots} |\n")
-        f.write(f"| BRISQUE ↓ | {min(brisque):.4f} | {(best_brisque_idx+1)*opt.snapshots} |\n")

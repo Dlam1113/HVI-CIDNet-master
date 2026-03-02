@@ -30,27 +30,31 @@ def parse_args():
     """解析命令行参数"""
     parser = argparse.ArgumentParser(description='计算FID指标')
     
-    # 必需参数
-    parser.add_argument('--output_dir', type=str, required=True,
+    # ====== 在这里直接填写路径，就不需要在命令行输入了 ======
+    parser.add_argument('--output_dir', type=str, 
+                        default='./results/LOLv1/',          # ← 增强图片保存到哪里
                         help='模型输出图像目录（增强后的图像）')
-    parser.add_argument('--gt_dir', type=str, required=True,
+    parser.add_argument('--gt_dir', type=str, 
+                        default='./datasets/LOLdataset/eval15/high/',  # ← 真值图片目录
                         help='真值图像目录（Ground Truth）')
     
-    # 可选：指定模型进行推理
-    parser.add_argument('--model_path', type=str, default=None,
+    # 可选：指定模型进行推理（填了就会先跑模型生成增强图，不填就直接用output_dir里已有的图）
+    parser.add_argument('--model_path', type=str, 
+                        default='./weights/train/best.pth',  # ← 改成你挑出的最优pth路径
                         help='模型权重路径（如需要先推理再计算FID）')
-    parser.add_argument('--input_dir', type=str, default=None,
+    parser.add_argument('--input_dir', type=str, 
+                        default='./datasets/LOLdataset/eval15/low/',   # ← 低光照输入图片目录
                         help='低光照输入图像目录（推理时使用）')
     
     # 模型配置（推理时使用）
-    parser.add_argument('--dual_space', action='store_true',
-                        help='使用DualSpaceCIDNet（默认原CIDNet）')
+    parser.add_argument('--dual_space', type=bool, default=True,
+                        help='使用DualSpaceCIDNet（默认启用）')
     parser.add_argument('--use_rgb_refiner', type=bool, default=True,
                         help='是否启用RGB Refiner')
     parser.add_argument('--refiner_mid_ch', type=int, default=64,
                         help='Refiner中间通道数')
-    parser.add_argument('--use_curve', action='store_true',
-                        help='是否启用神经曲线层')
+    parser.add_argument('--use_curve', type=bool, default=True,
+                        help='是否启用神经曲线层（默认启用）')
     parser.add_argument('--curve_M', type=int, default=11,
                         help='曲线控制点数')
     

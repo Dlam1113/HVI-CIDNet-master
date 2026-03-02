@@ -84,8 +84,6 @@ def option():
                         help='是否启用RGB后处理微调（消融实验可关闭）')
     parser.add_argument('--refiner_mid_ch', type=int, default=64,
                         help='RGB Refiner中间层通道数')
-    parser.add_argument('--freeze_epoch', type=int, default=0,
-                        help='第几个epoch冻结CIDNet只训练Refiner（0=不冻结）')
     
     # ========== 神经曲线层消融实验 ==========
     parser.add_argument('--use_curve', type=bool, default=False,

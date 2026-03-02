@@ -9,13 +9,7 @@ from PIL import Image
 from tqdm import tqdm
 import argparse
 import platform
-from loss.niqe_utils import calculate_niqe  # NIQE无参考指标
-try:
-    import imquality.brisque as brisque_mod  # BRISQUE无参考指标
-    HAS_BRISQUE = True
-except ImportError:
-    HAS_BRISQUE = False
-    print("警告: imquality库未安装，BRISQUE指标将跳过。安装: pip install image-quality")
+
 
 mea_parser = argparse.ArgumentParser(description='Measure')
 mea_parser.add_argument('--use_GT_mean', action='store_true', help='Use the mean of GT to rectify the output of the model')
@@ -79,23 +73,18 @@ def calculate_psnr(target, ref):
 
 def metrics(im_dir, label_dir, use_GT_mean):
     """
-    计算图像质量评估指标
-    
-    全参考指标（需要GT）：PSNR、SSIM、LPIPS
-    无参考指标（不需GT）：NIQE、BRISQUE
+    计算图像质量评估指标（全参考指标）
     
     参数:
         im_dir: 模型输出图像目录
         label_dir: 真值图像目录
         use_GT_mean: 是否使用GT均值校正亮度
     返回:
-        avg_psnr, avg_ssim, avg_lpips, avg_niqe, avg_brisque
+        avg_psnr, avg_ssim, avg_lpips
     """
     avg_psnr = 0
     avg_ssim = 0
     avg_lpips = 0
-    avg_niqe = 0
-    avg_brisque = 0
     n = 0
     loss_fn = lpips.LPIPS(net='alex')
     loss_fn.cuda()
@@ -153,25 +142,10 @@ def metrics(im_dir, label_dir, use_GT_mean):
         ex_ref = lpips.im2tensor(im2_np).cuda()
         score_lpips = loss_fn.forward(ex_ref, ex_p0)
         
-        # ========== 无参考指标 ==========
-        # NIQE：自然度评估（越低越好）
-        score_niqe = calculate_niqe(im1_np, input_order='HWC', convert_to='y')
-        
-        # BRISQUE：空间质量评估（越低越好）
-        # 注意：传入numpy RGB数组，避免imquality内部rgb2gray二次转换bug
-        if HAS_BRISQUE:
-            try:
-                score_brisque = brisque_mod.score(im1_np)
-            except Exception:
-                score_brisque = 0
-        else:
-            score_brisque = 0
     
         avg_psnr += score_psnr
         avg_ssim += score_ssim
         avg_lpips += score_lpips.item()
-        avg_niqe += score_niqe
-        avg_brisque += score_brisque
         torch.cuda.empty_cache()
     
     # 防止除以零错误
@@ -180,14 +154,12 @@ def metrics(im_dir, label_dir, use_GT_mean):
         print(f"  im_dir: {im_dir}")
         print(f"  label_dir: {label_dir}")
         print(f"  请检查路径是否正确，以及文件扩展名是否匹配")
-        return 0, 0, 0, 0, 0
+        return 0, 0, 0
 
     avg_psnr = avg_psnr / n
     avg_ssim = avg_ssim / n
     avg_lpips = avg_lpips / n
-    avg_niqe = avg_niqe / n
-    avg_brisque = avg_brisque / n
-    return avg_psnr, avg_ssim, avg_lpips, avg_niqe, avg_brisque
+    return avg_psnr, avg_ssim, avg_lpips
 
 
 if __name__ == '__main__':
@@ -211,9 +183,7 @@ if __name__ == '__main__':
         im_dir = './output/fivek/*.jpg'
         label_dir = './datasets/FiveK/test/target/'
 
-    avg_psnr, avg_ssim, avg_lpips, avg_niqe, avg_brisque = metrics(im_dir, label_dir, mea.use_GT_mean)
+    avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, mea.use_GT_mean)
     print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
     print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
     print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
-    print("===> Avg.NIQE: {:.4f} ".format(avg_niqe))
-    print("===> Avg.BRISQUE: {:.4f} ".format(avg_brisque))
