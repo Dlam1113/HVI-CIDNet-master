@@ -153,7 +153,7 @@ def checkpoint(epoch):
     
 def load_datasets():
     print('===> Loading datasets')
-    if opt.lol_v1 or opt.lol_blur or opt.lolv2_real or opt.lolv2_syn or opt.SID or opt.SICE_mix or opt.SICE_grad or opt.fivek or opt.LoLI_Street:
+    if opt.lol_v1 or opt.lol_blur or opt.lolv2_real or opt.lolv2_syn or opt.SID or opt.SICE_mix or opt.SICE_grad or opt.fivek or opt.LoLI_Street or opt.combined_pedestrian or opt.pedestrian_loli or opt.pedestrian_foggy or opt.pedestrian_rain:
         if opt.lol_v1:
             train_set = get_lol_training_set(opt.data_train_lol_v1,size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
@@ -206,6 +206,44 @@ def load_datasets():
             train_set = get_LoLI_Street_training_set(opt.data_LoLI_Street, size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
             test_set = get_SICE_eval_set(opt.data_val_LoLI_Street)  # 使用 SICE eval（返回4个值）
+            testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
+        
+        if opt.combined_pedestrian:
+            # 合并行人数据集：LoLI低光照 + Cityscapes雾天 + Cityscapes雨天
+            train_dirs = [
+                opt.data_pedestrian_loli,   # LoLI-Street 低光照行人（~3030对）
+                opt.data_pedestrian_foggy,  # Cityscapes 雾天行人（~2347对）
+                opt.data_pedestrian_rain,   # Cityscapes 雨天行人（~1092对）
+            ]
+            val_dirs = [
+                opt.data_pedestrian_loli_val,   # LoLI 验证集（~273对）
+                opt.data_pedestrian_foggy_val,  # Foggy 验证集（~403对）
+                opt.data_pedestrian_rain_val,   # Rain 验证集
+            ]
+            train_set = get_combined_pedestrian_training_set(train_dirs, size=opt.cropSize)
+            training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
+            test_set = get_combined_pedestrian_eval_set(val_dirs)
+            testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
+        
+        if opt.pedestrian_loli:
+            # 仅LoLI-Street低光照行人数据集（~3030对训练）
+            train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_loli], size=opt.cropSize)
+            training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
+            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_loli_val])
+            testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
+        
+        if opt.pedestrian_foggy:
+            # 仅Cityscapes雾天行人数据集（~2347对训练）
+            train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_foggy], size=opt.cropSize)
+            training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
+            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_foggy_val])
+            testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
+        
+        if opt.pedestrian_rain:
+            # 仅Cityscapes雨天行人数据集（~1092对训练）
+            train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_rain], size=opt.cropSize)
+            training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
+            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_rain_val])
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
     else:
         raise ValueError("should choose a dataset")

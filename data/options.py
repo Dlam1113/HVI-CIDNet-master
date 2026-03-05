@@ -35,6 +35,14 @@ def option():
     parser.add_argument('--data_train_fivek'        , type=str, default='./datasets/FiveK/train')
     parser.add_argument('--data_LoLI_Street'        , type=str, default='./datasets/LoLI-Street/Train') 
 
+    # ========== 合并行人数据集路径（服务器上 filtered/ 在 HVI-CIDNet-master 下） ==========
+    parser.add_argument('--data_pedestrian_loli'    , type=str, default='./filtered/loli_pedestrian')
+    parser.add_argument('--data_pedestrian_foggy'   , type=str, default='./filtered/cityscapes_foggy_pedestrian')
+    parser.add_argument('--data_pedestrian_rain'    , type=str, default='./filtered/cityscapes_rain_pedestrian')
+    parser.add_argument('--data_pedestrian_loli_val' , type=str, default='./filtered/loli_pedestrian_val')
+    parser.add_argument('--data_pedestrian_foggy_val', type=str, default='./filtered/cityscapes_foggy_pedestrian_val')
+    parser.add_argument('--data_pedestrian_rain_val' , type=str, default='./filtered/cityscapes_rain_pedestrian_val')
+
     # validation input   验证输入路径
     parser.add_argument('--data_val_lol_blur'       , type=str, default='./datasets/LOL_blur/eval/low_blur')
     parser.add_argument('--data_val_lol_v1'         , type=str, default='./datasets/LOLdataset/eval15/low')
@@ -102,4 +110,12 @@ def option():
     parser.add_argument('--SICE_grad', type=bool, default=False)
     parser.add_argument('--fivek', type=bool, default=False)
     parser.add_argument('--LoLI_Street', type=bool, default=False)
+    parser.add_argument('--combined_pedestrian', type=bool, default=False,
+                        help='使用合并行人数据集（LoLI低光照+Cityscapes雾天+雨天）')
+    parser.add_argument('--pedestrian_loli', type=bool, default=False,
+                        help='仅使用LoLI-Street低光照行人数据集')
+    parser.add_argument('--pedestrian_foggy', type=bool, default=False,
+                        help='仅使用Cityscapes雾天行人数据集')
+    parser.add_argument('--pedestrian_rain', type=bool, default=False,
+                        help='仅使用Cityscapes雨天行人数据集')
     return parser

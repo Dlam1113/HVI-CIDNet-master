@@ -69,3 +69,13 @@ def get_fivek_training_set(data_dir,size):
 
 def get_fivek_eval_set(data_dir):
     return SICEDatasetFromFolderEval(data_dir, transform=transform2())
+
+
+def get_combined_pedestrian_training_set(data_dirs, size):
+    """加载合并行人训练数据集（LoLI + Foggy + Rain）"""
+    return CombinedPedestrianDataset(data_dirs, transform=transform1(size))
+
+
+def get_combined_pedestrian_eval_set(data_dirs):
+    """加载合并行人验证数据集"""
+    return CombinedPedestrianEvalDataset(data_dirs, transform=transform2())
