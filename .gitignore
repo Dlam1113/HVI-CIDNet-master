@@ -179,3 +179,8 @@ UWEnhancement-master/
 construction/
 doc/
 metrics/
+new_datasets/
+filter_loli_pedestrian.py
+filter_cityscapes_pedestrian.py
+filter_cityscapes_rain_pedestrian.py
+filtered/
