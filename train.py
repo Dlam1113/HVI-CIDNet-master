@@ -413,19 +413,19 @@ if __name__ == '__main__':
                 norm_size = False
             if opt.pedestrian_loli:
                 output_folder = 'pedestrian_loli/'
-                label_dir = opt.data_pedestrian_loli_val + '/high'
+                label_dir = opt.data_pedestrian_loli_val + '/high/'
                 norm_size = False
             if opt.pedestrian_foggy:
                 output_folder = 'pedestrian_foggy/'
-                label_dir = opt.data_pedestrian_foggy_val + '/high'
+                label_dir = opt.data_pedestrian_foggy_val + '/high/'
                 norm_size = False
             if opt.pedestrian_rain:
                 output_folder = 'pedestrian_rain/'
-                label_dir = opt.data_pedestrian_rain_val + '/high'
+                label_dir = opt.data_pedestrian_rain_val + '/high/'
                 norm_size = False
             if opt.combined_pedestrian:
                 output_folder = 'combined_pedestrian/'
-                label_dir = opt.data_pedestrian_loli_val + '/high'  # 用LoLI验证集的GT算指标
+                label_dir = opt.data_pedestrian_loli_val + '/high/'  # 用LoLI验证集的GT算指标
                 norm_size = False
             
             im_dir = opt.val_folder + output_folder  # 只传目录路径
