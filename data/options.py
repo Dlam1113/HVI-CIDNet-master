@@ -7,7 +7,7 @@ def option():
 
     # 添加各种命令行参数
     parser.add_argument('--batchSize', type=int, default=4, help='training batch size')
-    parser.add_argument('--cropSize', type=int, default=256, help='image crop size (patch size)')
+    parser.add_argument('--cropSize', type=int, default=512, help='image crop size (patch size)')
     parser.add_argument('--nEpochs', type=int, default=1500, help='number of epochs to train for end')
     parser.add_argument('--start_epoch', type=int, default=0, help='number of epochs to start, >0 is retrained a pre-trained pth')
     parser.add_argument('--snapshots', type=int, default=5, help='Snapshots for save checkpoints pth')
@@ -94,14 +94,14 @@ def option():
                         help='RGB Refiner中间层通道数')
     
     # ========== 神经曲线层消融实验 ==========
-    parser.add_argument('--use_curve', type=bool, default=False,
+    parser.add_argument('--use_curve', type=bool, default=True,
                         help='是否使用神经曲线层对I通道进行全局调整（消融实验）')
     parser.add_argument('--curve_M', type=int, default=11,
                         help='曲线控制点数量')
     
     
     # choose which dataset you want to train, please only set one "True"
-    parser.add_argument('--lol_v1', type=bool, default=True)
+    parser.add_argument('--lol_v1', type=bool, default=False)
     parser.add_argument('--lolv2_real', type=bool, default=False)
     parser.add_argument('--lolv2_syn', type=bool, default=False)
     parser.add_argument('--lol_blur', type=bool, default=False)
@@ -112,7 +112,7 @@ def option():
     parser.add_argument('--LoLI_Street', type=bool, default=False)
     parser.add_argument('--combined_pedestrian', type=bool, default=False,
                         help='使用合并行人数据集（LoLI低光照+Cityscapes雾天+雨天）')
-    parser.add_argument('--pedestrian_loli', type=bool, default=False,
+    parser.add_argument('--pedestrian_loli', type=bool, default=True,
                         help='仅使用LoLI-Street低光照行人数据集')
     parser.add_argument('--pedestrian_foggy', type=bool, default=False,
                         help='仅使用Cityscapes雾天行人数据集')
