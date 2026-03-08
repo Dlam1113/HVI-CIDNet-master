@@ -1,0 +1,9 @@
+--- Reducing Datasets ---
+[loli_pedestrian] Current pairs: 3030
+  -> Moving 1630 pairs to unused directories...
+  -> Done. Reduced to 1400 pairs. (Moved 1630 pairs)
+------------------------------
+[cityscapes_foggy_pedestrian] Current pairs: 2347
+  -> Moving 947 pairs to unused directories...
+  -> Done. Reduced to 1400 pairs. (Moved 947 pairs)
+Finished.
