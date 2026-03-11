@@ -222,28 +222,28 @@ def load_datasets():
             ]
             train_set = get_combined_pedestrian_training_set(train_dirs, size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
-            test_set = get_combined_pedestrian_eval_set(val_dirs)
+            test_set = get_combined_pedestrian_eval_set(val_dirs, eval_size=opt.eval_size)
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
         
         if opt.pedestrian_loli:
             # 仅LoLI-Street低光照行人数据集（~3030对训练）
             train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_loli], size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
-            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_loli_val])
+            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_loli_val], eval_size=opt.eval_size)
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
         
         if opt.pedestrian_foggy:
             # 仅Cityscapes雾天行人数据集（~2347对训练）
             train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_foggy], size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
-            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_foggy_val])
+            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_foggy_val], eval_size=opt.eval_size)
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
         
         if opt.pedestrian_rain:
             # 仅Cityscapes雨天行人数据集（~1092对训练）
             train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_rain], size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
-            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_rain_val])
+            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_rain_val], eval_size=opt.eval_size)
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
     else:
         raise ValueError("should choose a dataset")

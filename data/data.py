@@ -1,4 +1,4 @@
-from torchvision.transforms import Compose, ToTensor, RandomCrop, RandomHorizontalFlip, RandomVerticalFlip
+from torchvision.transforms import Compose, ToTensor, RandomCrop, RandomHorizontalFlip, RandomVerticalFlip, Resize
 from data.LOLdataset import *
 from data.eval_sets import *
 from data.SICE_blur_SID import *
@@ -20,8 +20,13 @@ def transform1(size=256):
         ToTensor(),
     ])
 
-def transform2():
+def transform2(eval_size=0):
     """评估时使用的数据变换，不包含随机操作"""
+    if eval_size > 0:
+        return Compose([
+            Resize((eval_size, eval_size)),
+            ToTensor()
+        ])
     return Compose([ToTensor()])    # 仅转换为张量
 
 
@@ -76,6 +81,6 @@ def get_combined_pedestrian_training_set(data_dirs, size):
     return CombinedPedestrianDataset(data_dirs, transform=transform1(size))
 
 
-def get_combined_pedestrian_eval_set(data_dirs):
+def get_combined_pedestrian_eval_set(data_dirs, eval_size=0):
     """加载合并行人验证数据集"""
-    return CombinedPedestrianEvalDataset(data_dirs, transform=transform2())
+    return CombinedPedestrianEvalDataset(data_dirs, transform=transform2(eval_size))
