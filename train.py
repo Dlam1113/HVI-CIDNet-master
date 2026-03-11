@@ -153,7 +153,7 @@ def checkpoint(epoch):
     
 def load_datasets():
     print('===> Loading datasets')
-    if opt.lol_v1 or opt.lol_blur or opt.lolv2_real or opt.lolv2_syn or opt.SID or opt.SICE_mix or opt.SICE_grad or opt.fivek or opt.LoLI_Street or opt.combined_pedestrian or opt.pedestrian_loli or opt.pedestrian_foggy or opt.pedestrian_rain:
+    if opt.lol_v1 or opt.lol_blur or opt.lolv2_real or opt.lolv2_syn or opt.SID or opt.SICE_mix or opt.SICE_grad or opt.fivek or opt.LoLI_Street or opt.combined_pedestrian:
         if opt.lol_v1:
             train_set = get_lol_training_set(opt.data_train_lol_v1,size=opt.cropSize)
             training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
@@ -225,26 +225,7 @@ def load_datasets():
             test_set = get_combined_pedestrian_eval_set(val_dirs, eval_size=opt.eval_size)
             testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
         
-        if opt.pedestrian_loli:
-            # 仅LoLI-Street低光照行人数据集（~3030对训练）
-            train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_loli], size=opt.cropSize)
-            training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
-            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_loli_val], eval_size=opt.eval_size)
-            testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
-        
-        if opt.pedestrian_foggy:
-            # 仅Cityscapes雾天行人数据集（~2347对训练）
-            train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_foggy], size=opt.cropSize)
-            training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
-            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_foggy_val], eval_size=opt.eval_size)
-            testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
-        
-        if opt.pedestrian_rain:
-            # 仅Cityscapes雨天行人数据集（~1092对训练）
-            train_set = get_combined_pedestrian_training_set([opt.data_pedestrian_rain], size=opt.cropSize)
-            training_data_loader = DataLoader(dataset=train_set, num_workers=opt.threads, batch_size=opt.batchSize, shuffle=opt.shuffle)
-            test_set = get_combined_pedestrian_eval_set([opt.data_pedestrian_rain_val], eval_size=opt.eval_size)
-            testing_data_loader = DataLoader(dataset=test_set, num_workers=opt.threads, batch_size=1, shuffle=False)
+        # （已删除三个单独子数据集的训练代码，统一使用 combined_pedestrian）
     else:
         raise ValueError("should choose a dataset")
     return training_data_loader, testing_data_loader
@@ -349,6 +330,8 @@ if __name__ == '__main__':
     ssim = []
     #学习感知图像块相似度（越低越好）
     lpips = []
+    # 分子集指标记录（每个元素是一个dict: {'loli': (p,s,l), 'foggy': (p,s,l), 'rain': (p,s,l)}）
+    subset_metrics = []
     start_epoch=0
     if opt.start_epoch > 0:
         start_epoch = opt.start_epoch
@@ -411,18 +394,6 @@ if __name__ == '__main__':
                 output_folder = 'LoLI_Street/'
                 label_dir = opt.data_valgt_LoLI_Street
                 norm_size = False
-            if opt.pedestrian_loli:
-                output_folder = 'pedestrian_loli/'
-                label_dir = opt.data_pedestrian_loli_val + '/high/'
-                norm_size = False
-            if opt.pedestrian_foggy:
-                output_folder = 'pedestrian_foggy/'
-                label_dir = opt.data_pedestrian_foggy_val + '/high/'
-                norm_size = False
-            if opt.pedestrian_rain:
-                output_folder = 'pedestrian_rain/'
-                label_dir = opt.data_pedestrian_rain_val + '/high/'
-                norm_size = False
             if opt.combined_pedestrian:
                 output_folder = 'combined_pedestrian/'
                 norm_size = False
@@ -434,9 +405,9 @@ if __name__ == '__main__':
             
             # ===== 计算评估指标 =====
             if opt.combined_pedestrian:
-                # 合并数据集特殊处理：分别对三个子集计算指标再求加权平均
-                # 因为输出图片来自三个不同的 GT 目录，不能用单一 label_dir
+                # 合并数据集验证：先分子集出指标，再在整体300张上直接跑一遍
                 import glob as glob_mod
+                import shutil
                 
                 # 三个子数据集的 GT 目录
                 gt_dirs = {
@@ -453,7 +424,6 @@ if __name__ == '__main__':
                 )
                 
                 # 按文件名前缀分类到各自的临时目录
-                import shutil, tempfile
                 temp_dirs = {}
                 for key in gt_dirs:
                     temp_dir = os.path.join(im_dir, f'_temp_{key}')
@@ -470,30 +440,50 @@ if __name__ == '__main__':
                         # LoLI 的文件名没有特定前缀
                         shutil.copy2(fpath, os.path.join(temp_dirs['loli'], fname))
                 
-                # 分别计算各子集指标
-                total_psnr, total_ssim, total_lpips, total_n = 0, 0, 0, 0
+                # ===== 第一步：分别计算各子集指标 =====
+                print("\n--- 分子集 (Per-Subset) 验证指标 ---")
+                epoch_subset = {}  # 本epoch的分子集指标
                 for key in gt_dirs:
-                    sub_files = os.listdir(temp_dirs[key])
+                    sub_files = [f for f in os.listdir(temp_dirs[key]) if not f.startswith('_')]
                     sub_n = len(sub_files)
                     if sub_n == 0:
+                        print(f"  [{key}] 无输出图片，跳过")
+                        epoch_subset[key] = (0, 0, 0, 0)
                         continue
                     sub_psnr, sub_ssim, sub_lpips = metrics(
                         temp_dirs[key] + '/', gt_dirs[key], use_GT_mean=False
                     )
                     print(f"  [{key}] n={sub_n}, PSNR={sub_psnr:.4f}, SSIM={sub_ssim:.4f}, LPIPS={sub_lpips:.4f}")
-                    total_psnr += sub_psnr * sub_n
-                    total_ssim += sub_ssim * sub_n
-                    total_lpips += sub_lpips * sub_n
-                    total_n += sub_n
+                    epoch_subset[key] = (sub_psnr, sub_ssim, sub_lpips, sub_n)
+                    
+                    # 各子集指标也记录到TensorBoard
+                    writer.add_scalar(f'Eval_{key}/PSNR', sub_psnr, epoch)
+                    writer.add_scalar(f'Eval_{key}/SSIM', sub_ssim, epoch)
+                    writer.add_scalar(f'Eval_{key}/LPIPS', sub_lpips, epoch)
+                
+                subset_metrics.append(epoch_subset)
                 
                 # 清理临时目录
                 for key in temp_dirs:
                     shutil.rmtree(temp_dirs[key], ignore_errors=True)
                 
-                # 加权平均
-                avg_psnr = total_psnr / total_n if total_n > 0 else 0
-                avg_ssim = total_ssim / total_n if total_n > 0 else 0
-                avg_lpips = total_lpips / total_n if total_n > 0 else 0
+                # ===== 第二步：在整体合并的300张上直接跑一遍总指标 =====
+                # 构建合并 GT 临时目录：将三个子集的 GT 图片按原文件名汇聚到一个目录
+                combined_gt_dir = os.path.join(im_dir, '_temp_combined_gt')
+                os.makedirs(combined_gt_dir, exist_ok=True)
+                for key, gt_dir in gt_dirs.items():
+                    for f in os.listdir(gt_dir):
+                        src = os.path.join(gt_dir, f)
+                        if os.path.isfile(src):
+                            shutil.copy2(src, os.path.join(combined_gt_dir, f))
+                
+                print("\n--- 整体 (Combined) 验证指标 ---")
+                avg_psnr, avg_ssim, avg_lpips = metrics(
+                    im_dir, combined_gt_dir + '/', use_GT_mean=False
+                )
+                
+                # 清理合并GT临时目录
+                shutil.rmtree(combined_gt_dir, ignore_errors=True)
             else:
                 # 非合并数据集：直接计算
                 avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)
@@ -502,12 +492,12 @@ if __name__ == '__main__':
             print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
             print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
                 
-            # 保存指标到列表
+            # 保存指标到列表（使用整体指标作为模型选择依据）
             psnr.append(avg_psnr)
             ssim.append(avg_ssim)
             lpips.append(avg_lpips)
                 
-            # 【TensorBoard记录】记录评估指标
+            # 【TensorBoard记录】记录整体评估指标
             writer.add_scalar('Eval/PSNR', avg_psnr, epoch)
             writer.add_scalar('Eval/SSIM', avg_ssim, epoch)
             writer.add_scalar('Eval/LPIPS', avg_lpips, epoch)
@@ -573,13 +563,26 @@ if __name__ == '__main__':
         f.write(f"- **最佳SSIM**: {max(ssim):.4f} (Epoch {(best_ssim_idx+1)*opt.snapshots})\n")
         f.write(f"- **最低LPIPS**: {min(lpips):.4f} (Epoch {(best_lpips_idx+1)*opt.snapshots})\n\n")
         
-        # 指标表格
-        f.write("| Epochs | PSNR | SSIM | LPIPS |\n")  
-        f.write("|--------|------|------|-------|\n")  
+        # 整体指标表格
+        f.write("## 整体 (Combined) 指标\n\n")
+        f.write("| Epochs | PSNR | SSIM | LPIPS |\n")
+        f.write("|--------|------|------|-------|\n")
         for i in range(len(psnr)):
             f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | {psnr[i]:.4f} | {ssim[i]:.4f} | {lpips[i]:.4f} |\n")
         
-        f.write(f"\n## 最终结果\n\n")
+        # 分子集指标表格（仅在合并数据集模式下）
+        if opt.combined_pedestrian and len(subset_metrics) > 0:
+            for subset_key in ['loli', 'foggy', 'rain']:
+                subset_name = {'loli': 'LoLI 低光照', 'foggy': 'Cityscapes 雾天', 'rain': 'Cityscapes 雨天'}[subset_key]
+                f.write(f"\n## {subset_name} ({subset_key}) 子集指标\n\n")
+                f.write("| Epochs | PSNR | SSIM | LPIPS | n |\n")
+                f.write("|--------|------|------|-------|---|\n")
+                for i, sm in enumerate(subset_metrics):
+                    if subset_key in sm:
+                        sp, ss, sl, sn = sm[subset_key]
+                        f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | {sp:.4f} | {ss:.4f} | {sl:.4f} | {sn} |\n")
+        
+        f.write(f"\n## 最终结果（整体）\n\n")
         f.write(f"| 指标 | 最佳值 | 对应Epoch |\n")
         f.write(f"|------|--------|----------|\n")
         f.write(f"| PSNR ↑ | {max(psnr):.4f} | {(best_psnr_idx+1)*opt.snapshots} |\n")

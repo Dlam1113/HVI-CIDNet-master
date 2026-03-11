@@ -113,10 +113,4 @@ def option():
     parser.add_argument('--LoLI_Street', type=bool, default=False)
     parser.add_argument('--combined_pedestrian', type=bool, default=True,
                         help='使用合并行人数据集（LoLI低光照+Cityscapes雾天+雨天）')
-    parser.add_argument('--pedestrian_loli', type=bool, default=False,
-                        help='仅使用LoLI-Street低光照行人数据集')
-    parser.add_argument('--pedestrian_foggy', type=bool, default=False,
-                        help='仅使用Cityscapes雾天行人数据集')
-    parser.add_argument('--pedestrian_rain', type=bool, default=False,
-                        help='仅使用Cityscapes雨天行人数据集')
     return parser
