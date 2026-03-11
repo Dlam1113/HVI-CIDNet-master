@@ -425,7 +425,6 @@ if __name__ == '__main__':
                 norm_size = False
             if opt.combined_pedestrian:
                 output_folder = 'combined_pedestrian/'
-                label_dir = opt.data_pedestrian_loli_val + '/high/'  # 用LoLI验证集的GT算指标
                 norm_size = False
             
             im_dir = opt.val_folder + output_folder  # 只传目录路径
@@ -433,8 +432,72 @@ if __name__ == '__main__':
             eval(model, testing_data_loader, model_out_path, opt.val_folder+output_folder, 
                     norm_size=norm_size, LOL=opt.lol_v1, v2=opt.lolv2_real, alpha=0.8)
             
-            # 计算评估指标
-            avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)
+            # ===== 计算评估指标 =====
+            if opt.combined_pedestrian:
+                # 合并数据集特殊处理：分别对三个子集计算指标再求加权平均
+                # 因为输出图片来自三个不同的 GT 目录，不能用单一 label_dir
+                import glob as glob_mod
+                
+                # 三个子数据集的 GT 目录
+                gt_dirs = {
+                    'loli': opt.data_pedestrian_loli_val + '/high/',
+                    'foggy': opt.data_pedestrian_foggy_val + '/high/',
+                    'rain': opt.data_pedestrian_rain_val + '/high/',
+                }
+                
+                # 获取所有输出图片
+                all_output_files = sorted(
+                    glob_mod.glob(im_dir + '*.png') + 
+                    glob_mod.glob(im_dir + '*.jpg') +
+                    glob_mod.glob(im_dir + '*.jpeg')
+                )
+                
+                # 按文件名前缀分类到各自的临时目录
+                import shutil, tempfile
+                temp_dirs = {}
+                for key in gt_dirs:
+                    temp_dir = os.path.join(im_dir, f'_temp_{key}')
+                    os.makedirs(temp_dir, exist_ok=True)
+                    temp_dirs[key] = temp_dir
+                
+                for fpath in all_output_files:
+                    fname = os.path.basename(fpath)
+                    if fname.startswith('foggy_'):
+                        shutil.copy2(fpath, os.path.join(temp_dirs['foggy'], fname))
+                    elif fname.startswith('rain_'):
+                        shutil.copy2(fpath, os.path.join(temp_dirs['rain'], fname))
+                    else:
+                        # LoLI 的文件名没有特定前缀
+                        shutil.copy2(fpath, os.path.join(temp_dirs['loli'], fname))
+                
+                # 分别计算各子集指标
+                total_psnr, total_ssim, total_lpips, total_n = 0, 0, 0, 0
+                for key in gt_dirs:
+                    sub_files = os.listdir(temp_dirs[key])
+                    sub_n = len(sub_files)
+                    if sub_n == 0:
+                        continue
+                    sub_psnr, sub_ssim, sub_lpips = metrics(
+                        temp_dirs[key] + '/', gt_dirs[key], use_GT_mean=False
+                    )
+                    print(f"  [{key}] n={sub_n}, PSNR={sub_psnr:.4f}, SSIM={sub_ssim:.4f}, LPIPS={sub_lpips:.4f}")
+                    total_psnr += sub_psnr * sub_n
+                    total_ssim += sub_ssim * sub_n
+                    total_lpips += sub_lpips * sub_n
+                    total_n += sub_n
+                
+                # 清理临时目录
+                for key in temp_dirs:
+                    shutil.rmtree(temp_dirs[key], ignore_errors=True)
+                
+                # 加权平均
+                avg_psnr = total_psnr / total_n if total_n > 0 else 0
+                avg_ssim = total_ssim / total_n if total_n > 0 else 0
+                avg_lpips = total_lpips / total_n if total_n > 0 else 0
+            else:
+                # 非合并数据集：直接计算
+                avg_psnr, avg_ssim, avg_lpips = metrics(im_dir, label_dir, use_GT_mean=False)
+            
             print("===> Avg.PSNR: {:.4f} dB ".format(avg_psnr))
             print("===> Avg.SSIM: {:.4f} ".format(avg_ssim))
             print("===> Avg.LPIPS: {:.4f} ".format(avg_lpips))
