@@ -6,11 +6,11 @@ def option():
     parser = argparse.ArgumentParser(description='CIDNet')
 
     # 添加各种命令行参数
-    parser.add_argument('--batchSize', type=int, default=4, help='training batch size')
-    parser.add_argument('--cropSize', type=int, default=512, help='image crop size (patch size)')
-    parser.add_argument('--nEpochs', type=int, default=1500, help='number of epochs to train for end')
+    parser.add_argument('--batchSize', type=int, default=16, help='training batch size')
+    parser.add_argument('--cropSize', type=int, default=256, help='image crop size (patch size)')
+    parser.add_argument('--nEpochs', type=int, default=1000, help='number of epochs to train for end')
     parser.add_argument('--start_epoch', type=int, default=0, help='number of epochs to start, >0 is retrained a pre-trained pth')
-    parser.add_argument('--snapshots', type=int, default=5, help='Snapshots for save checkpoints pth')
+    parser.add_argument('--snapshots', type=int, default=10, help='Snapshots for save checkpoints pth')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning Rate')
     parser.add_argument('--gpu_mode', type=bool, default=True)
     parser.add_argument('--shuffle', type=bool, default=True)
@@ -110,9 +110,9 @@ def option():
     parser.add_argument('--SICE_grad', type=bool, default=False)
     parser.add_argument('--fivek', type=bool, default=False)
     parser.add_argument('--LoLI_Street', type=bool, default=False)
-    parser.add_argument('--combined_pedestrian', type=bool, default=False,
+    parser.add_argument('--combined_pedestrian', type=bool, default=True,
                         help='使用合并行人数据集（LoLI低光照+Cityscapes雾天+雨天）')
-    parser.add_argument('--pedestrian_loli', type=bool, default=True,
+    parser.add_argument('--pedestrian_loli', type=bool, default=False,
                         help='仅使用LoLI-Street低光照行人数据集')
     parser.add_argument('--pedestrian_foggy', type=bool, default=False,
                         help='仅使用Cityscapes雾天行人数据集')
