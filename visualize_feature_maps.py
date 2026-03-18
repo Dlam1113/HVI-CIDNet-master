@@ -329,17 +329,24 @@ def main():
     has_curve = any('i_curve' in k for k in state_dict.keys())
     has_refiner = any('rgb_refiner' in k for k in state_dict.keys())
     
+    # 自动从权重推断 refiner_mid_ch（避免默认值与训练配置不一致）
+    refiner_mid_ch = 32  # 默认值
+    if has_refiner and 'rgb_refiner.conv1.weight' in state_dict:
+        refiner_mid_ch = state_dict['rgb_refiner.conv1.weight'].shape[0]
+    
     print(f"  检测到 Neural Curve Layer: {'✅ 是' if has_curve else '❌ 否'}")
     print(f"  检测到 RGB Refiner:        {'✅ 是' if has_refiner else '❌ 否'}")
+    print(f"  自动推断 refiner_mid_ch:   {refiner_mid_ch}")
     
-    # 创建模型实例
+    # 创建模型实例（使用从权重推断的参数）
     model = DualSpaceCIDNet(
         use_rgb_refiner=has_refiner,
         use_curve=has_curve,
+        refiner_mid_ch=refiner_mid_ch,
     )
     
     # 加载权重
-    model.load_state_dict(state_dict, strict=False)
+    model.load_state_dict(state_dict, strict=True)  # 改为 strict=True，确保完全匹配
     print(f"  模型加载成功! 总参数: {sum(p.numel() for p in model.parameters()):,}")
     
     # ===== 2. 加载输入图片 =====
