@@ -330,8 +330,6 @@ if __name__ == '__main__':
     ssim = []
     #学习感知图像块相似度（越低越好）
     lpips = []
-    # 分子集指标记录（每个元素是一个dict: {'loli': (p,s,l), 'foggy': (p,s,l), 'rain': (p,s,l)}）
-    subset_metrics = []
     start_epoch=0
     if opt.start_epoch > 0:
         start_epoch = opt.start_epoch
@@ -405,8 +403,7 @@ if __name__ == '__main__':
             
             # ===== 计算评估指标 =====
             if opt.combined_pedestrian:
-                # 合并数据集验证：先分子集出指标，再在整体300张上直接跑一遍
-                import glob as glob_mod
+                # 合并数据集验证：直接在整体合并的 GT 上计算总指标（不再拆分子集）
                 import shutil
                 
                 # 三个子数据集的 GT 目录
@@ -416,59 +413,7 @@ if __name__ == '__main__':
                     'rain': opt.data_pedestrian_rain_val + '/high/',
                 }
                 
-                # 获取所有输出图片
-                all_output_files = sorted(
-                    glob_mod.glob(im_dir + '*.png') + 
-                    glob_mod.glob(im_dir + '*.jpg') +
-                    glob_mod.glob(im_dir + '*.jpeg')
-                )
-                
-                # 按文件名前缀分类到各自的临时目录
-                temp_dirs = {}
-                for key in gt_dirs:
-                    temp_dir = os.path.join(im_dir, f'_temp_{key}')
-                    os.makedirs(temp_dir, exist_ok=True)
-                    temp_dirs[key] = temp_dir
-                
-                for fpath in all_output_files:
-                    fname = os.path.basename(fpath)
-                    if fname.startswith('foggy_'):
-                        shutil.copy2(fpath, os.path.join(temp_dirs['foggy'], fname))
-                    elif fname.startswith('rain_'):
-                        shutil.copy2(fpath, os.path.join(temp_dirs['rain'], fname))
-                    else:
-                        # LoLI 的文件名没有特定前缀
-                        shutil.copy2(fpath, os.path.join(temp_dirs['loli'], fname))
-                
-                # ===== 第一步：分别计算各子集指标 =====
-                print("\n--- 分子集 (Per-Subset) 验证指标 ---")
-                epoch_subset = {}  # 本epoch的分子集指标
-                for key in gt_dirs:
-                    sub_files = [f for f in os.listdir(temp_dirs[key]) if not f.startswith('_')]
-                    sub_n = len(sub_files)
-                    if sub_n == 0:
-                        print(f"  [{key}] 无输出图片，跳过")
-                        epoch_subset[key] = (0, 0, 0, 0)
-                        continue
-                    sub_psnr, sub_ssim, sub_lpips = metrics(
-                        temp_dirs[key] + '/', gt_dirs[key], use_GT_mean=False
-                    )
-                    print(f"  [{key}] n={sub_n}, PSNR={sub_psnr:.4f}, SSIM={sub_ssim:.4f}, LPIPS={sub_lpips:.4f}")
-                    epoch_subset[key] = (sub_psnr, sub_ssim, sub_lpips, sub_n)
-                    
-                    # 各子集指标也记录到TensorBoard
-                    writer.add_scalar(f'Eval_{key}/PSNR', sub_psnr, epoch)
-                    writer.add_scalar(f'Eval_{key}/SSIM', sub_ssim, epoch)
-                    writer.add_scalar(f'Eval_{key}/LPIPS', sub_lpips, epoch)
-                
-                subset_metrics.append(epoch_subset)
-                
-                # 清理临时目录
-                for key in temp_dirs:
-                    shutil.rmtree(temp_dirs[key], ignore_errors=True)
-                
-                # ===== 第二步：在整体合并的300张上直接跑一遍总指标 =====
-                # 构建合并 GT 临时目录：将三个子集的 GT 图片按原文件名汇聚到一个目录
+                # 构建合并 GT 临时目录：将三个子集的 GT 图片汇聚到一个目录
                 combined_gt_dir = os.path.join(im_dir, '_temp_combined_gt')
                 os.makedirs(combined_gt_dir, exist_ok=True)
                 for key, gt_dir in gt_dirs.items():
@@ -570,17 +515,7 @@ if __name__ == '__main__':
         for i in range(len(psnr)):
             f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | {psnr[i]:.4f} | {ssim[i]:.4f} | {lpips[i]:.4f} |\n")
         
-        # 分子集指标表格（仅在合并数据集模式下）
-        if opt.combined_pedestrian and len(subset_metrics) > 0:
-            for subset_key in ['loli', 'foggy', 'rain']:
-                subset_name = {'loli': 'LoLI 低光照', 'foggy': 'Cityscapes 雾天', 'rain': 'Cityscapes 雨天'}[subset_key]
-                f.write(f"\n## {subset_name} ({subset_key}) 子集指标\n\n")
-                f.write("| Epochs | PSNR | SSIM | LPIPS | n |\n")
-                f.write("|--------|------|------|-------|---|\n")
-                for i, sm in enumerate(subset_metrics):
-                    if subset_key in sm:
-                        sp, ss, sl, sn = sm[subset_key]
-                        f.write(f"| {opt.start_epoch+(i+1)*opt.snapshots} | {sp:.4f} | {ss:.4f} | {sl:.4f} | {sn} |\n")
+        # 分子集指标表格已移除（验证阶段仅计算整体指标）
         
         f.write(f"\n## 最终结果（整体）\n\n")
         f.write(f"| 指标 | 最佳值 | 对应Epoch |\n")
