@@ -34,7 +34,8 @@ def option():
     parser.add_argument('--data_train_SID'          , type=str, default='./datasets/Sony_total_dark/train')
     parser.add_argument('--data_train_SICE'         , type=str, default='./datasets/SICE/Dataset/train')
     parser.add_argument('--data_train_fivek'        , type=str, default='./datasets/FiveK/train')
-    parser.add_argument('--data_LoLI_Street'        , type=str, default='./datasets/LoLI-Street/Train') 
+    parser.add_argument('--data_LoLI_Street'        , type=str, default='./filtered/loli_pedestrian',
+                        help='LoLI-Street训练数据根目录（下含 low/ 和 high/）') 
 
     # ========== 合并行人数据集路径（服务器上 filtered/ 在 HVI-CIDNet-master 下） ==========
     parser.add_argument('--data_pedestrian_loli'    , type=str, default='./filtered/loli_pedestrian')
@@ -53,7 +54,8 @@ def option():
     parser.add_argument('--data_val_SICE_mix'       , type=str, default='./datasets/SICE/Dataset/eval/test')
     parser.add_argument('--data_val_SICE_grad'      , type=str, default='./datasets/SICE/Dataset/eval/test')
     parser.add_argument('--data_test_fivek'         , type=str, default='./datasets/FiveK/test/input')
-    parser.add_argument('--data_val_LoLI_Street'    , type=str, default='./datasets/LoLI-Street/Val/low')
+    parser.add_argument('--data_val_LoLI_Street'    , type=str, default='./filtered/loli_pedestrian_val/low',
+                        help='LoLI-Street验证集输入（low目录）')
 
     # validation groundtruth   验证真值路径
     parser.add_argument('--data_valgt_lol_blur'     , type=str, default='./datasets/LOL_blur/eval/high_sharp_scaled/')
@@ -64,7 +66,8 @@ def option():
     parser.add_argument('--data_valgt_SICE_mix'     , type=str, default='./datasets/SICE/Dataset/eval/target/')
     parser.add_argument('--data_valgt_SICE_grad'    , type=str, default='./datasets/SICE/Dataset/eval/target/')
     parser.add_argument('--data_valgt_fivek'        , type=str, default='./datasets/FiveK/test/target/')
-    parser.add_argument('--data_valgt_LoLI_Street'  , type=str, default='./datasets/LoLI-Street/Val/high')
+    parser.add_argument('--data_valgt_LoLI_Street'  , type=str, default='./filtered/loli_pedestrian_val/high',
+                        help='LoLI-Street验证集GT（high目录）')
 
     parser.add_argument('--val_folder', default='./results/', help='Location to save validation datasets')
 
@@ -110,7 +113,8 @@ def option():
     parser.add_argument('--SICE_mix', type=bool, default=False)
     parser.add_argument('--SICE_grad', type=bool, default=False)
     parser.add_argument('--fivek', type=bool, default=False)
-    parser.add_argument('--LoLI_Street', type=bool, default=False)
-    parser.add_argument('--combined_pedestrian', type=bool, default=True,
+    parser.add_argument('--LoLI_Street', type=bool, default=True,
+                        help='仅使用 LoLI-Street 低光照数据集训练与验证')
+    parser.add_argument('--combined_pedestrian', type=bool, default=False,
                         help='使用合并行人数据集（LoLI低光照+Cityscapes雾天+雨天）')
     return parser
