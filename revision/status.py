@@ -11,7 +11,7 @@ from revision.cdd11 import ARCHIVES
 
 
 def snapshot(root):
-    """使用已分配磁盘块估算下载进度，避免把稀疏预分配文件当成下载完成。"""
+    """统计 HTTP 实收字节，旧 Xet 缓存按磁盘块估算，避免预分配造成虚假进度。"""
     root = Path(root).resolve()
     state_path = root/"preparation_status.json"
     state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {"phase": "waiting"}
