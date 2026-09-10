@@ -198,4 +198,4 @@ measure_fid.py
 measure_niqe_bris.py
 measure_SID_blur.py
 net/CrossSpaceAttention.py
-AGENTS.md/
+AGENTS.md
