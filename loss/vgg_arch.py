@@ -199,7 +199,8 @@ class VGGFeatureExtractor(nn.Module):
             else:
                 modified_net[k] = v
 
-        self.vgg_net = nn.Sequential(modified_net).cuda()
+        # 设备由外部损失模块统一设置，避免初始化时隐式占用默认 GPU。
+        self.vgg_net = nn.Sequential(modified_net)
 
         if not requires_grad:
             self.vgg_net.eval()
