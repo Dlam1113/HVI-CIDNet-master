@@ -25,6 +25,11 @@ def snapshot(root):
         if final.exists():
             allocated = min(size, final.stat().st_size)
             modified = final.stat().st_mtime
+        elif (root/"downloads"/"http_parts"/filename).is_dir():
+            for part in (root/"downloads"/"http_parts"/filename).iterdir():
+                if part.is_file() and part.suffix in {".part", ".tmp"}:
+                    allocated += part.stat().st_size
+                    modified = max(modified or 0, part.stat().st_mtime)
         else:
             for partial in (root/"downloads"/".cache"/"huggingface"/"download").glob("*"+checksum+"*.incomplete"):
                 stat = partial.stat()
@@ -45,7 +50,7 @@ def snapshot(root):
             "total_bytes": sum(f["total_bytes"] for f in files),
             "written_bytes": sum(f["written_bytes"] for f in files),
             "free_bytes": shutil.disk_usage(root).free, "root": str(root), "log": log_lines,
-            "progress_basis": "磁盘已写入量估算；下载完成后另行校验 SHA-256"}
+            "progress_basis": "HTTP 分段按实际接收字节计数；Xet 旧缓存仅按磁盘块估算"}
 
 
 def main():

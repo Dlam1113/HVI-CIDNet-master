@@ -46,26 +46,26 @@ def download(root):
     """在 Linux 服务器下载固定版本原始压缩包，并核对官方大小与 SHA-256。"""
     if sys.platform != "linux":
         raise RuntimeError("按项目约定，数据集下载只能在 Linux 服务器执行。")
-    from huggingface_hub import hf_hub_download
+    from revision.http_download import ranged_download, cleanup_parts
 
     root = Path(root).resolve()
     root.mkdir(parents=True, exist_ok=True)
-    required = sum(size for size, _ in ARCHIVES.values()) + 40 * 1024**3
+    required = 2*sum(size for size, _ in ARCHIVES.values()) + 40 * 1024**3
     existing = sum(p.stat().st_size for p in (root / "downloads").glob("*.zip"))
     if shutil.disk_usage(root).free < required - existing:
         raise RuntimeError("可用磁盘空间不足以同时保留压缩包和解压数据。")
     for filename, (size, checksum) in ARCHIVES.items():
         print("开始下载：" + filename, flush=True)
-        archive = Path(hf_hub_download(
-            repo_id=REPO_ID, repo_type="dataset", filename=filename,
-            revision=REVISION, local_dir=str(root / "downloads"), token=False,
-        ))
+        archive = ranged_download(
+            "https://huggingface.co/datasets/%s/resolve/%s/%s" % (REPO_ID, REVISION, filename),
+            root/"downloads"/filename, size)
         if archive.stat().st_size != size or sha256_file(archive) != checksum:
             raise RuntimeError("压缩包大小或 SHA-256 校验失败：" + filename)
         write_json(root / (filename + ".verified.json"), {
             "repo_id": REPO_ID, "revision": REVISION,
             "filename": filename, "bytes": size, "sha256": checksum,
         })
+        cleanup_parts(archive)
         print("完整性校验通过：" + filename, flush=True)
 
 
