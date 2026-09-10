@@ -188,3 +188,13 @@ IEEE-Transactions-LaTeX2e-templates-and-instructions/
 architecture.drawio
 introduction.txt
 paper/
+elsarticle/
+
+# Legacy baseline / unused experiment files removed from tracking
+Readme.md
+eval_hf.py
+eval_SID_blur.py
+measure_fid.py
+measure_niqe_bris.py
+measure_SID_blur.py
+net/CrossSpaceAttention.py
