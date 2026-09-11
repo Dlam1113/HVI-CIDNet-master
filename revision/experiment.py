@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader
 from revision.cdd11 import sha256_file, write_json
 from revision.dataset import PairedManifestDataset, StepBatchSampler, assert_no_scene_overlap
 from revision.evaluation import evaluate, predict, save_evaluation
+from revision.numerics import NumericalGuard, validate_model_numerics
 
 
 def source_info():
@@ -42,7 +43,7 @@ def nonfinite_parameters(model):
 
 
 def seed_all(seed):
-    """固定随机种子并关闭 cuDNN 自动选算法；具体环境仍随运行记录保存。"""
+    """固定随机种子，关闭 cuDNN 自动选算法及 TF32，沿用 FP32 计算。"""
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
@@ -50,6 +51,8 @@ def seed_all(seed):
         torch.cuda.manual_seed_all(seed)
     torch.backends.cudnn.benchmark = False
     torch.backends.cudnn.deterministic = True
+    torch.backends.cuda.matmul.allow_tf32 = False
+    torch.backends.cudnn.allow_tf32 = False
 
 
 class LegacyRestorationLoss(torch.nn.Module):
@@ -108,6 +111,8 @@ def train(args):
         "val_manifest_sha256": sha256_file(args.val_manifest),
         "sampling": "task_uniform_then_scene_uniform_with_replacement",
         "scheduler": "linear_warmup_then_single_cosine", "gamma_augmentation": False,
+        "precision": "fp32_tf32_disabled",
+        "numerical_guard": "legacy_curve11_first_bias_negative_infinity_only",
         "loss": "legacy_rgb_hvi_l1_1_ssim_0.5_edge_50_vgg_0.01", "source": source_info()}
     model = build_model(args.model).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -119,9 +124,7 @@ def train(args):
         model.load_state_dict(state["model"], strict=True)
         optimizer.load_state_dict(state["optimizer"])
         start, best = state["step"], state["best_val_psnr"]
-    invalid = nonfinite_parameters(model)
-    if invalid:
-        raise FloatingPointError("模型参数含非有限值，暂不能开始正式训练：" + ", ".join(invalid))
+    validate_model_numerics(model, optimizer)
     if args.output.exists() and not args.resume:
         raise FileExistsError("输出目录已存在；请指定新目录或显式恢复已有实验。")
     loss_fn = LegacyRestorationLoss().to(device)
@@ -139,7 +142,7 @@ def train(args):
     model.train()
     optimizer.zero_grad(set_to_none=True)
     running = 0.0
-    with (args.output/"train.jsonl").open("a", encoding="utf-8") as log:
+    with NumericalGuard(model, optimizer) as guard, (args.output/"train.jsonl").open("a", encoding="utf-8") as log:
         for micro_index, batch in enumerate(loader):
             step = start + micro_index//args.accum_steps
             lr = learning_rate(step, args.max_steps, args.warmup_steps, args.lr)
@@ -159,6 +162,7 @@ def train(args):
             record = {"step": step+1, "loss": running, "lr": lr, "grad_norm": float(norm)}
             running = 0.0
             if (step+1) % args.eval_every == 0 or step+1 == args.max_steps:
+                guard.check_state()
                 rows, summary = evaluate(model, val_loader, device)
                 record["val_macro_psnr"] = summary["groups"]["all"]["psnr"]
                 improved = record["val_macro_psnr"] > best
@@ -236,8 +240,8 @@ def main():
             command.add_argument("--train-manifest", type=Path, required=True)
             command.add_argument("--val-manifest", type=Path, required=True)
             command.add_argument("--max-steps", type=int, required=True)
-            command.add_argument("--batch-size", type=int, default=2)
-            command.add_argument("--accum-steps", type=int, default=8)
+            command.add_argument("--batch-size", type=int, default=16)
+            command.add_argument("--accum-steps", type=int, default=1)
             command.add_argument("--lr", type=float, default=1e-4)
             command.add_argument("--warmup-steps", type=int, default=1000)
             command.add_argument("--eval-every", type=int, default=2000)

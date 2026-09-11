@@ -10,13 +10,16 @@ import torch
 import torch.nn.functional as F
 
 from revision.cdd11 import SINGLE, DOUBLE, TRIPLE, write_json
+from revision.numerics import require_finite_tensor
 
 
 def predict(model, image):
     """仅把边缘补齐到 8 的倍数，预测后裁回原尺寸，不改变图像分辨率。"""
     height, width = image.shape[-2:]
     image = F.pad(image, (0, (-width) % 8, 0, (-height) % 8), mode="replicate")
-    return model(image)[..., :height, :width].clamp(0, 1)
+    output = model(image)
+    require_finite_tensor(output, "评估模型原始输出")
+    return output[..., :height, :width].clamp(0, 1)
 
 
 def image_metrics(prediction, target):
