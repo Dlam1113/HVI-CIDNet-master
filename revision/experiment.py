@@ -7,6 +7,7 @@ from pathlib import Path
 import random
 import subprocess
 import sys
+import uuid
 
 import numpy as np
 import torch
@@ -16,6 +17,7 @@ from revision.cdd11 import sha256_file, write_json
 from revision.dataset import PairedManifestDataset, StepBatchSampler, assert_no_scene_overlap
 from revision.evaluation import evaluate, predict, save_evaluation
 from revision.numerics import NumericalGuard, validate_model_numerics
+from revision.schedules import lr_at_step
 
 
 def source_info():
@@ -79,12 +81,9 @@ class LegacyRestorationLoss(torch.nn.Module):
         return self.domain_loss(output, target) + self.domain_loss(model.HVIT(output), model.HVIT(target))
 
 
-def learning_rate(step, total, warmup, peak):
-    """采用明确的线性预热与单次余弦下降；属于新增实验协议。"""
-    if step < warmup:
-        return peak*(step+1)/max(1, warmup)
-    fraction = (step-warmup)/max(1, total-warmup-1)
-    return 1e-7 + 0.5*(peak-1e-7)*(1+math.cos(math.pi*fraction))
+def learning_rate(step, total, warmup, peak, scheduler="single_cosine"):
+    """按参数更新计数计算学习率，显式区分旧两段形状与新增单段曲线。"""
+    return lr_at_step(step, total, warmup, peak, scheduler)
 
 
 def checkpoint(path, model, optimizer, step, best, config):
@@ -92,6 +91,7 @@ def checkpoint(path, model, optimizer, step, best, config):
     temporary = path.with_suffix(".tmp")
     torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
                 "step": step, "best_val_psnr": best, "config": config,
+                "python_rng": random.getstate(), "numpy_rng": np.random.get_state(),
                 "torch_rng": torch.get_rng_state(),
                 "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None}, temporary)
     temporary.replace(path)
@@ -110,7 +110,7 @@ def train(args):
         "train_manifest_sha256": sha256_file(args.train_manifest),
         "val_manifest_sha256": sha256_file(args.val_manifest),
         "sampling": "task_uniform_then_scene_uniform_with_replacement",
-        "scheduler": "linear_warmup_then_single_cosine", "gamma_augmentation": False,
+        "scheduler": getattr(args, "scheduler", "single_cosine"), "gamma_augmentation": False,
         "precision": "fp32_tf32_disabled",
         "numerical_guard": "legacy_curve11_first_bias_negative_infinity_only",
         "loss": "legacy_rgb_hvi_l1_1_ssim_0.5_edge_50_vgg_0.01", "source": source_info()}
@@ -119,21 +119,42 @@ def train(args):
     start, best = 0, -math.inf
     if args.resume:
         state = torch.load(args.resume, map_location="cpu")
-        if state["config"] != config:
-            raise ValueError("恢复配置或代码、清单来源发生变化，请建立新实验。")
+        saved_config = {key: value for key, value in state["config"].items() if key != "source"}
+        current_config = {key: value for key, value in config.items() if key != "source"}
+        if saved_config != current_config:
+            raise ValueError("恢复训练超参数或数据清单发生变化，请建立新实验。")
+        if state["config"].get("source") != config["source"]:
+            if not getattr(args, "allow_source_change", False):
+                raise ValueError("恢复代码或运行环境来源发生变化；核查后才可显式使用 --allow-source-change。")
+            print("已显式允许恢复来源变化；本次运行将单独记录原始与当前代码来源。", flush=True)
+        start, best = state["step"], state["best_val_psnr"]
+        if start == args.max_steps:
+            print("该权重已完成全部 %d 次更新，无需继续训练。" % start, flush=True)
+            return
         model.load_state_dict(state["model"], strict=True)
         optimizer.load_state_dict(state["optimizer"])
-        start, best = state["step"], state["best_val_psnr"]
     validate_model_numerics(model, optimizer)
     if args.output.exists() and not args.resume:
         raise FileExistsError("输出目录已存在；请指定新目录或显式恢复已有实验。")
     loss_fn = LegacyRestorationLoss().to(device)
     if args.resume:
+        if "python_rng" in state:
+            random.setstate(state["python_rng"])
+        if "numpy_rng" in state:
+            np.random.set_state(state["numpy_rng"])
         torch.set_rng_state(state["torch_rng"])
         if state["cuda_rng"] is not None and device.type == "cuda":
             torch.cuda.set_rng_state_all(state["cuda_rng"])
     args.output.mkdir(parents=True, exist_ok=True)
-    write_json(args.output/"config.json", config)
+    attempt_id = uuid.uuid4().hex[:12]
+    attempt_name = "resume_step_%07d_%s" % (start, attempt_id) if args.resume else "start_" + attempt_id
+    write_json(args.output/("attempt_"+attempt_name+".json"), {
+        "start_step": start, "config": config,
+        "resume_checkpoint": str(args.resume.resolve()) if args.resume else None,
+        "resume_source": state["config"].get("source") if args.resume else None,
+        "log_file": "train_"+attempt_name+".jsonl"})
+    if not args.resume:
+        write_json(args.output/"config.json", config)
     sampler = StepBatchSampler(train_set.records, args.batch_size, args.accum_steps,
                                 args.max_steps, args.seed, start)
     loader = DataLoader(train_set, batch_sampler=sampler, num_workers=args.workers,
@@ -142,10 +163,12 @@ def train(args):
     model.train()
     optimizer.zero_grad(set_to_none=True)
     running = 0.0
-    with NumericalGuard(model, optimizer) as guard, (args.output/"train.jsonl").open("a", encoding="utf-8") as log:
+    # 每次恢复写独立日志，保留中断前记录，避免重跑步数混在同一日志中。
+    with NumericalGuard(model, optimizer) as guard, (args.output/("train_"+attempt_name+".jsonl")).open("x", encoding="utf-8") as log:
         for micro_index, batch in enumerate(loader):
             step = start + micro_index//args.accum_steps
-            lr = learning_rate(step, args.max_steps, args.warmup_steps, args.lr)
+            lr = learning_rate(step, args.max_steps, args.warmup_steps, args.lr,
+                               getattr(args, "scheduler", "single_cosine"))
             for group in optimizer.param_groups:
                 group["lr"] = lr
             image, target = batch["input"].to(device), batch["target"].to(device)
@@ -167,10 +190,14 @@ def train(args):
                 record["val_macro_psnr"] = summary["groups"]["all"]["psnr"]
                 improved = record["val_macro_psnr"] > best
                 best = max(best, record["val_macro_psnr"])
-                save_evaluation(args.output/("val_step_%07d" % (step+1)), rows, summary, config)
-                checkpoint(args.output/"last.pt", model, optimizer, step+1, best, config)
+                # 新尝试使用新目录；中断留下的旧结果保留，不能阻塞恢复后重新验证。
+                val_name = "val_step_%07d_attempt_%s" % (step+1, attempt_id)
+                save_evaluation(args.output/val_name, rows, summary, config)
+                record["validation_dir"] = val_name
                 if improved:
                     checkpoint(args.output/"best.pt", model, optimizer, step+1, best, config)
+                # last.pt 最后原子替换，表示本次验证及最佳权重保存均已提交。
+                checkpoint(args.output/"last.pt", model, optimizer, step+1, best, config)
             log.write(json.dumps(record) + "\n")
             log.flush()
             if (step+1) % 20 == 0 or step == start:
@@ -243,9 +270,13 @@ def main():
             command.add_argument("--batch-size", type=int, default=16)
             command.add_argument("--accum-steps", type=int, default=1)
             command.add_argument("--lr", type=float, default=1e-4)
+            command.add_argument("--scheduler", choices=["single_cosine", "legacy_two_stage"],
+                                 default="single_cosine")
             command.add_argument("--warmup-steps", type=int, default=1000)
             command.add_argument("--eval-every", type=int, default=2000)
             command.add_argument("--resume", type=Path)
+            command.add_argument("--allow-source-change", action="store_true",
+                                 help="仅在核查代码差异后，显式允许以相同实验配置恢复")
         else:
             command.add_argument("--manifest", type=Path, required=True)
         if action == "test":
@@ -258,6 +289,8 @@ def main():
                                   or args.warmup_steps >= args.max_steps):
         parser.error("训练步数、验证间隔或预热步数无效。")
     torch.set_num_threads(args.cpu_threads)
+    if args.action == "train":
+        learning_rate(0, args.max_steps, args.warmup_steps, args.lr, args.scheduler)
     {"train": train, "test": test, "smoke": smoke}[args.action](args)
 
 
