@@ -129,7 +129,7 @@ def find_split(root, split):
 
 
 def inspect_split(directory, tasks=TASKS):
-    """严格检查各退化与清晰图文件名、尺寸和解码有效性，计算清晰内容摘要。"""
+    """检查配对与解码有效性，返回全部原图及摘要，重复内容交由分组规则处理。"""
     from PIL import Image
 
     directory = Path(directory)
@@ -154,15 +154,29 @@ def inspect_split(directory, tasks=TASKS):
                 im.verify()
         if i % 100 == 0:
             print("%s 已检查 %d/%d 个场景" % (directory.name, i, len(names)), flush=True)
-    if len(set(hashes.values())) != len(hashes):
-        raise ValueError("同一官方划分存在重复清晰内容，请核实后再抽样。")
     return names, hashes
 
 
+def group_clean_content(names, hashes):
+    """按解码清晰内容分组，以组内字典序最小文件名作为固定代表，不删除原图。"""
+    groups = {}
+    for name in sorted(names):
+        groups.setdefault(hashes[name], []).append(name)
+    representatives, duplicates = [], []
+    for checksum, members in sorted(groups.items(), key=lambda item: item[1][0]):
+        representative = members[0]
+        representatives.append(representative)
+        if len(members) > 1:
+            duplicates.append({"target_sha256_rgb": checksum,
+                               "representative": representative,
+                               "members": members, "excluded_names": members[1:]})
+    return representatives, duplicates
+
+
 def select_scenes(names, train_count, val_count, seed):
-    """对排序后的原始场景做固定种子抽样，训练、验证与备用集合互斥。"""
+    """对排序后的唯一内容代表做固定种子抽样，训练、验证与备用集合互斥。"""
     if train_count < 1 or val_count < 1 or train_count + val_count > len(names):
-        raise ValueError("训练和验证场景数必须为正且不超过官方训练集大小。")
+        raise ValueError("训练和验证场景数必须为正且不超过唯一清晰内容组数量。")
     ordered = sorted(names)
     random.Random(seed).shuffle(ordered)
     return (sorted(ordered[:train_count]), sorted(ordered[train_count:train_count+val_count]),
@@ -179,7 +193,7 @@ def make_records(directory, names, tasks, hashes, root):
 
 
 def prepare(root, output, train_count=600, val_count=100, seed=20260910, expected_counts=(1183, 200)):
-    """检查官方数据后生成 11 任务与 4 任务清单，禁止用测试数据选模型。"""
+    """按唯一清晰内容组划分训练和验证，完整保留官方测试，并保存可复核审计。"""
     root = Path(root).resolve()
     output = Path(output).resolve()
     if output.exists() and any(output.iterdir()):
@@ -189,12 +203,46 @@ def prepare(root, output, train_count=600, val_count=100, seed=20260910, expecte
     test_names, test_hashes = inspect_split(test_dir)
     if expected_counts and (len(train_names), len(test_names)) != expected_counts:
         raise ValueError("官方场景数与预期不一致：%s" % ((len(train_names), len(test_names)),))
+    representatives, duplicate_groups = group_clean_content(train_names, train_hashes)
+    _, test_duplicates = group_clean_content(test_names, test_hashes)
+    if test_duplicates:
+        raise ValueError("官方测试划分存在重复清晰内容，需核实；不会自动删减官方测试集。")
     if set(train_hashes.values()) & set(test_hashes.values()):
         raise ValueError("官方训练与测试出现相同清晰图像内容，停止生成清单。")
-    selected, validation, unused = select_scenes(train_names, train_count, val_count, seed)
+    selected, validation, unused = select_scenes(representatives, train_count, val_count, seed)
+    excluded = sorted(name for group in duplicate_groups for name in group["excluded_names"])
+    selected_hashes = {train_hashes[name] for name in selected}
+    validation_hashes = {train_hashes[name] for name in validation}
+    if selected_hashes & validation_hashes:
+        raise ValueError("训练与验证出现同一清晰内容，停止生成清单。")
+    for group in duplicate_groups:
+        representative = group["representative"]
+        group["representative_split"] = ("train" if representative in selected else
+                                         "val" if representative in validation else "unused")
+    protocol = {
+        "name": "official_train_unique_clear_content_representative_split_v1",
+        "content_hash": "SHA-256(str(PIL_RGB_size).encode() + decoded_RGB_bytes)",
+        "representative_rule": "lexicographically_smallest_filename_per_identical_clear_content_group",
+        "sampling_rule": "sort_representatives_then_random.Random(seed).shuffle; train_then_val_then_unused",
+        "selected_scene_tasks": "keep_all_11_degradations_for_each_selected_representative",
+        "test_rule": "preserve_all_official_test_scenes_without_sampling",
+        "raw_images_modified_or_deleted": False,
+    }
     summary = {"repo_id": REPO_ID, "revision": REVISION, "seed": seed,
                "train_scene_ids": selected, "val_scene_ids": validation,
-               "unused_train_scene_ids": unused, "test_scene_ids": test_names,
+               "unused_train_scene_ids": sorted(unused + excluded),
+               "unused_unique_train_scene_ids": unused,
+               "excluded_duplicate_train_scene_ids": excluded, "test_scene_ids": test_names,
+               "protocol": protocol,
+               "audit": {"official_train_scenes": len(train_names),
+                         "official_test_scenes": len(test_names),
+                         "unique_train_contents": len(representatives),
+                         "unique_test_contents": len(set(test_hashes.values())),
+                         "duplicate_train_groups": duplicate_groups,
+                         "excluded_duplicate_train_files": len(excluded),
+                         "representative_scene_ids": representatives,
+                         "train_val_content_overlap": 0,
+                         "official_train_test_content_overlap": 0},
                "counts": {"train_scenes": len(selected), "val_scenes": len(validation),
                           "test_scenes": len(test_names)}, "files": {}}
     for mode, tasks in (("all11", TASKS), ("single4", SINGLE)):
