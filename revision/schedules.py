@@ -3,6 +3,25 @@
 import math
 
 
+def continuation_lr_at_step(step, total, warmup, peak, initial):
+    """从源权重学习率平滑升至小峰值，再单段余弦下降至1e-7。
+
+    这是独立续训阶段的显式策略，不替换已完成实验的两段调度。
+    预热至少两次更新，余弦段也至少两次，首尾都覆盖端点。
+    """
+    if any(type(x) is not int for x in (step, total, warmup)):
+        raise ValueError("更新计数必须是整数")
+    if not 0 <= step < total or not 2 <= warmup <= total - 2:
+        raise ValueError("续训预热和余弦段各需至少两个更新")
+    if any(not math.isfinite(x) or x <= 0 for x in (peak, initial)) or peak < 1e-7:
+        raise ValueError("续训学习率必须有限且为正，峰值不得小于1e-7")
+    if initial > peak:
+        raise ValueError("源学习率高于指定峰值，不符合当前平滑升温策略")
+    if step < warmup:
+        return initial + (peak-initial) * step / (warmup-1)
+    return _cosine_between(step-warmup, total-warmup, peak, 1e-7)
+
+
 def _cosine_between(position, length, start, end):
     """计算含首尾端点的余弦插值，至少两个位置才能覆盖两个端点。"""
     if position == 0:

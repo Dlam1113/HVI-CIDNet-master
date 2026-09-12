@@ -3,6 +3,7 @@
 from collections import defaultdict
 import csv
 import math
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -58,8 +59,11 @@ def evaluate(model, loader, device, lpips_model=None, progress=True):
     was_training = model.training
     model.eval()
     rows = []
+    from tqdm import tqdm
     try:
-        with torch.no_grad():
+        with torch.no_grad(), tqdm(total=len(loader.dataset), desc="完整验证", unit="张",
+                                  file=sys.stdout, disable=not progress,
+                                  dynamic_ncols=True, mininterval=2) as bar:
             for index, batch in enumerate(loader):
                 output = predict(model, batch["input"].to(device))
                 target = batch["target"].to(device)
@@ -70,9 +74,15 @@ def evaluate(model, loader, device, lpips_model=None, progress=True):
                            **image_metrics(output[i], target[i])}
                     if lpips_model is not None:
                         row["lpips"] = float(lpips_model(output[i:i+1]*2-1, target[i:i+1]*2-1).item())
+                        if not math.isfinite(row["lpips"]):
+                            raise FloatingPointError("LPIPS指标非有限")
                     rows.append(row)
-                if progress and (index+1) % 50 == 0:
-                    print("已评估 %d 张图像" % len(rows), flush=True)
+                bar.update(len(output))
+                if (index+1) % 50 == 0:
+                    # 进度中只显示已处理图像的均值，最终结果另用任务等权宏平均。
+                    bar.set_postfix_str("已处理均值 " + " ".join(
+                        name.upper()+"=%.4f" % np.mean([r[name] for r in rows])
+                        for name in ("psnr", "ssim", "lpips") if name in rows[0]), refresh=False)
     finally:
         model.train(was_training)
     return rows, aggregate(rows)

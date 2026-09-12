@@ -7,6 +7,7 @@ from pathlib import Path
 import random
 import subprocess
 import sys
+import time
 import uuid
 
 import numpy as np
@@ -14,10 +15,11 @@ import torch
 from torch.utils.data import DataLoader
 
 from revision.cdd11 import sha256_file, write_json
+from revision.continuation import comparable_config, continuation_metadata, metric_text, validation_fields
 from revision.dataset import PairedManifestDataset, StepBatchSampler, assert_no_scene_overlap
 from revision.evaluation import evaluate, predict, save_evaluation
 from revision.numerics import NumericalGuard, validate_model_numerics
-from revision.schedules import lr_at_step
+from revision.schedules import lr_at_step, continuation_lr_at_step
 
 
 def source_info():
@@ -91,6 +93,7 @@ def checkpoint(path, model, optimizer, step, best, config):
     temporary = path.with_suffix(".tmp")
     torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(),
                 "step": step, "best_val_psnr": best, "config": config,
+                "lineage_step": config.get("continuation", {}).get("parent_lineage_step", 0) + step,
                 "python_rng": random.getstate(), "numpy_rng": np.random.get_state(),
                 "torch_rng": torch.get_rng_state(),
                 "cuda_rng": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None}, temporary)
@@ -114,13 +117,20 @@ def train(args):
         "precision": "fp32_tf32_disabled",
         "numerical_guard": "legacy_curve11_first_bias_negative_infinity_only",
         "loss": "legacy_rgb_hvi_l1_1_ssim_0.5_edge_50_vgg_0.01", "source": source_info()}
-    model = build_model(args.model).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    from tqdm import tqdm
+    config["val_lpips"] = args.val_lpips
+    if args.output.exists() and not args.resume:
+        raise FileExistsError("输出目录已存在；请指定新目录或显式恢复已有实验。")
+    if args.resume and args.continue_from:
+        raise ValueError("--resume 与 --continue-from 不能同时使用")
+    state = None
     start, best = 0, -math.inf
     if args.resume:
         state = torch.load(args.resume, map_location="cpu")
-        saved_config = {key: value for key, value in state["config"].items() if key != "source"}
-        current_config = {key: value for key, value in config.items() if key != "source"}
+        if "continuation" in state["config"]:
+            config["continuation"] = state["config"]["continuation"]
+        saved_config = comparable_config(state["config"])
+        current_config = comparable_config(config)
         if saved_config != current_config:
             raise ValueError("恢复训练超参数或数据清单发生变化，请建立新实验。")
         if state["config"].get("source") != config["source"]:
@@ -128,16 +138,39 @@ def train(args):
                 raise ValueError("恢复代码或运行环境来源发生变化；核查后才可显式使用 --allow-source-change。")
             print("已显式允许恢复来源变化；本次运行将单独记录原始与当前代码来源。", flush=True)
         start, best = state["step"], state["best_val_psnr"]
+        if not 0 <= start <= args.max_steps:
+            raise ValueError("权重步数超出本阶段预算")
         if start == args.max_steps:
             print("该权重已完成全部 %d 次更新，无需继续训练。" % start, flush=True)
             return
+    elif args.continue_from:
+        if args.continue_from.name != "best.pt":
+            raise ValueError("新阶段需指定原实验的best.pt，不能把last.pt的历史最优分数当作当前权重分数")
+        state = torch.load(args.continue_from, map_location="cpu")
+        config["continuation"] = continuation_metadata(
+            state, config, args.continue_from.resolve(), sha256_file(args.continue_from))
+        best = state["best_val_psnr"]
+    if args.scheduler == "continuation_cosine":
+        if "continuation" not in config:
+            raise ValueError("续训余弦调度需要 --continue-from 或新阶段的 --resume")
+        continuation_lr_at_step(start, args.max_steps, args.warmup_steps,
+                                args.lr, config["continuation"]["initial_lr"])
+    elif args.continue_from:
+        raise ValueError("新阶段显式使用 --scheduler continuation_cosine，不能冒充原阶段恢复")
+    model = build_model(args.model).to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    if state is not None:
         model.load_state_dict(state["model"], strict=True)
         optimizer.load_state_dict(state["optimizer"])
     validate_model_numerics(model, optimizer)
-    if args.output.exists() and not args.resume:
-        raise FileExistsError("输出目录已存在；请指定新目录或显式恢复已有实验。")
     loss_fn = LegacyRestorationLoss().to(device)
-    if args.resume:
+    lpips_model = None
+    if args.val_lpips:
+        import lpips
+        # 指标网络初始化不消耗训练随机序列；训练期间留在CPU以保留batch16显存余量。
+        with torch.random.fork_rng(devices=[]):
+            lpips_model = lpips.LPIPS(net="alex").eval().requires_grad_(False)
+    if state is not None:
         if "python_rng" in state:
             random.setstate(state["python_rng"])
         if "numpy_rng" in state:
@@ -152,23 +185,44 @@ def train(args):
         "start_step": start, "config": config,
         "resume_checkpoint": str(args.resume.resolve()) if args.resume else None,
         "resume_source": state["config"].get("source") if args.resume else None,
+        "continue_from": str(args.continue_from) if args.continue_from else None,
         "log_file": "train_"+attempt_name+".jsonl"})
     if not args.resume:
         write_json(args.output/"config.json", config)
+        if args.continue_from:
+            # 阶段0就是继承的最佳结果；续训无提升时best.pt仍有效，原目录不会写入。
+            checkpoint(args.output/"best.pt", model, optimizer, 0, best, config)
+            checkpoint(args.output/"last.pt", model, optimizer, 0, best, config)
+    offset = config.get("continuation", {}).get("parent_lineage_step", 0)
     sampler = StepBatchSampler(train_set.records, args.batch_size, args.accum_steps,
-                                args.max_steps, args.seed, start)
+                                offset + args.max_steps, args.seed, offset + start)
     loader = DataLoader(train_set, batch_sampler=sampler, num_workers=args.workers,
                         pin_memory=device.type == "cuda")
     val_loader = DataLoader(val_set, batch_size=1, shuffle=False, num_workers=args.workers)
     model.train()
     optimizer.zero_grad(set_to_none=True)
     running = 0.0
+    show_bar = args.progress == "bar" or (args.progress == "auto" and sys.stdout.isatty())
+    last_metrics = {}
+    update_started = time.perf_counter()
+    train_seconds = 0.0
+    validation_times = []
+    print("训练阶段：%d/%d；继承更新数=%d；最佳验证PSNR=%.5f" %
+          (start, args.max_steps, offset, best), flush=True)
+    print("三个指标来自完整验证集；首次验证前标为未测。LPIPS=" + str(args.val_lpips), flush=True)
     # 每次恢复写独立日志，保留中断前记录，避免重跑步数混在同一日志中。
-    with NumericalGuard(model, optimizer) as guard, (args.output/("train_"+attempt_name+".jsonl")).open("x", encoding="utf-8") as log:
+    with tqdm(total=args.max_steps, initial=start, desc="训练更新", unit="步", file=sys.stdout,
+              disable=not show_bar, dynamic_ncols=True, mininterval=2,
+              bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt} [{elapsed}{postfix}]") as bar, \
+            NumericalGuard(model, optimizer) as guard, \
+            (args.output/("train_"+attempt_name+".jsonl")).open("x", encoding="utf-8") as log:
         for micro_index, batch in enumerate(loader):
             step = start + micro_index//args.accum_steps
-            lr = learning_rate(step, args.max_steps, args.warmup_steps, args.lr,
-                               getattr(args, "scheduler", "single_cosine"))
+            if args.scheduler == "continuation_cosine":
+                lr = continuation_lr_at_step(step, args.max_steps, args.warmup_steps,
+                                             args.lr, config["continuation"]["initial_lr"])
+            else:
+                lr = learning_rate(step, args.max_steps, args.warmup_steps, args.lr, args.scheduler)
             for group in optimizer.param_groups:
                 group["lr"] = lr
             image, target = batch["input"].to(device), batch["target"].to(device)
@@ -182,12 +236,29 @@ def train(args):
             norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 0.01, error_if_nonfinite=True)
             optimizer.step()
             optimizer.zero_grad(set_to_none=True)
-            record = {"step": step+1, "loss": running, "lr": lr, "grad_norm": float(norm)}
+            # 同步后计时才包含GPU实际更新，时间包含取数据和全部累积微批。
+            if device.type == "cuda":
+                torch.cuda.synchronize(device)
+            elapsed = time.perf_counter() - update_started
+            train_seconds += elapsed
+            record = {"step": step+1, "lineage_step": offset+step+1,
+                      "loss": running, "lr": lr, "grad_norm": float(norm),
+                      "update_seconds": elapsed}
             running = 0.0
             if (step+1) % args.eval_every == 0 or step+1 == args.max_steps:
                 guard.check_state()
-                rows, summary = evaluate(model, val_loader, device)
-                record["val_macro_psnr"] = summary["groups"]["all"]["psnr"]
+                validation_start = time.perf_counter()
+                try:
+                    if lpips_model is not None:
+                        lpips_model.to(device)
+                    rows, summary = evaluate(model, val_loader, device, lpips_model, progress=show_bar)
+                finally:
+                    if lpips_model is not None:
+                        lpips_model.cpu()
+                record["validation_seconds"] = time.perf_counter() - validation_start
+                validation_times.append(record["validation_seconds"])
+                last_metrics = validation_fields(summary)
+                record.update(last_metrics)
                 improved = record["val_macro_psnr"] > best
                 best = max(best, record["val_macro_psnr"])
                 # 新尝试使用新目录；中断留下的旧结果保留，不能阻塞恢复后重新验证。
@@ -198,10 +269,34 @@ def train(args):
                     checkpoint(args.output/"best.pt", model, optimizer, step+1, best, config)
                 # last.pt 最后原子替换，表示本次验证及最佳权重保存均已提交。
                 checkpoint(args.output/"last.pt", model, optimizer, step+1, best, config)
+                tqdm.write("完整验证 %d/%d | %s | 最佳PSNR=%.5f | 耗时=%.1fs" %
+                           (step+1, args.max_steps, metric_text(last_metrics), best,
+                            record["validation_seconds"]), file=sys.stdout)
+            mean_update = train_seconds/(step+1-start)
+            remaining_updates = args.max_steps-step-1
+            remaining_vals = math.ceil(args.max_steps/args.eval_every) - (step+1)//args.eval_every
+            if step+1 == args.max_steps:
+                remaining_vals = 0
+            record["mean_update_seconds"] = mean_update
+            record["estimated_remaining_seconds"] = (remaining_updates*mean_update +
+                remaining_vals*sum(validation_times)/len(validation_times)) if validation_times else None
+            record["best_val_psnr"] = best
             log.write(json.dumps(record) + "\n")
             log.flush()
+            eta = record["estimated_remaining_seconds"]
+            eta_text = "待首验计时" if eta is None else "约%.2fh" % (eta/3600)
+            bar.set_postfix_str("loss=%.4f lr=%.2e %.3fs/步 剩余%s | 最近验证 %s" %
+                                (record["loss"], lr, mean_update, eta_text, metric_text(last_metrics)), refresh=False)
+            bar.update(1)
             if (step+1) % 20 == 0 or step == start:
-                print(json.dumps(record), flush=True)
+                tqdm.write(json.dumps(record), file=sys.stdout)
+            # 排除验证和日志耗时，下一计时段从等待下一批数据前开始。
+            update_started = time.perf_counter()
+    write_json(args.output/"completed.json", {"phase_steps": args.max_steps,
+        "lineage_steps": offset+args.max_steps, "best_val_psnr": best,
+        "attempt_mean_update_seconds": train_seconds/(args.max_steps-start),
+        "attempt_validation_seconds": validation_times})
+    print("本阶段训练完成；最佳权重：" + str(args.output/"best.pt"), flush=True)
 
 
 def test(args):
@@ -270,11 +365,14 @@ def main():
             command.add_argument("--batch-size", type=int, default=16)
             command.add_argument("--accum-steps", type=int, default=1)
             command.add_argument("--lr", type=float, default=1e-4)
-            command.add_argument("--scheduler", choices=["single_cosine", "legacy_two_stage"],
+            command.add_argument("--scheduler", choices=["single_cosine", "legacy_two_stage", "continuation_cosine"],
                                  default="single_cosine")
             command.add_argument("--warmup-steps", type=int, default=1000)
             command.add_argument("--eval-every", type=int, default=2000)
             command.add_argument("--resume", type=Path)
+            command.add_argument("--continue-from", type=Path, help="从权重及Adam状态创建独立新阶段")
+            command.add_argument("--val-lpips", action="store_true", help="完整验证同时计算AlexNet LPIPS")
+            command.add_argument("--progress", choices=["auto", "bar", "log"], default="auto")
             command.add_argument("--allow-source-change", action="store_true",
                                  help="仅在核查代码差异后，显式允许以相同实验配置恢复")
         else:
@@ -289,7 +387,7 @@ def main():
                                   or args.warmup_steps >= args.max_steps):
         parser.error("训练步数、验证间隔或预热步数无效。")
     torch.set_num_threads(args.cpu_threads)
-    if args.action == "train":
+    if args.action == "train" and args.scheduler != "continuation_cosine":
         learning_rate(0, args.max_steps, args.warmup_steps, args.lr, args.scheduler)
     {"train": train, "test": test, "smoke": smoke}[args.action](args)
 
