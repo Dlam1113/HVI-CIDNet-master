@@ -199,3 +199,10 @@ measure_niqe_bris.py
 measure_SID_blur.py
 net/CrossSpaceAttention.py
 AGENTS.md
+
+# Local temporary cache, workspace and office lock files (Windows-only)
+tmp/
+~$*
+*.tmp
+.vscode/
+.idea/
